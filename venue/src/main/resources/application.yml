@@ -1,0 +1,5 @@
+server:
+  port: 10401
+spring:
+  application:
+    name: venue-app
