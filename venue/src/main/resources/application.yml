@@ -1,0 +1,14 @@
+server:
+  port: 10401
+spring:
+  application:
+    name: venue
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
+  otlp:
+    metrics:
+      export:
+        enabled: false
