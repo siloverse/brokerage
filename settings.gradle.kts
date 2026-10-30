@@ -44,3 +44,13 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "brokerage"
+
+include(
+    ":orders",
+    ":ledger",
+    ":marketdata",
+    ":portfolio",
+    ":engine",
+    ":app",
+    ":venue"
+)
