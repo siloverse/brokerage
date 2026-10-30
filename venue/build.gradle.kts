@@ -3,15 +3,10 @@ plugins {
 }
 
 application {
-    mainClass.set("io.github.siloverse.brokerage.BrokerageApplicationKt")
+    mainClass.set("io.github.siloverse.venue.VenueApplicationKt")
 }
 
 dependencies {
-    implementation(project(":ledger"))
-    implementation(project(":orders"))
-    implementation(project(":engine"))
-    implementation(project(":marketdata"))
-    implementation(project(":portfolio"))
 
     implementation(platform(local.spring.modulith.bom))
     implementation(local.spring.modulith.starter.core)
