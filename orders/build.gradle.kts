@@ -1,8 +1,16 @@
+import io.github.siloverse.build.SiloverseBuild
+
 plugins {
     id("io.github.siloverse.jvm-library")
+    `java-test-fixtures`
 }
 
 dependencies {
     implementation(platform(local.spring.modulith.bom))
     implementation(local.spring.modulith.starter.core)
+    api(local.kotlinx.coroutines.core)
+
+    testFixturesImplementation(platform(SiloverseBuild.platformNotation))
+    testFixturesApi("org.junit.jupiter:junit-jupiter")
+    testFixturesApi(local.kotlinx.coroutines.test)
 }
