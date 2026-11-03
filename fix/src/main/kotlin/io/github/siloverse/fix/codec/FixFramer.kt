@@ -1,4 +1,4 @@
-package io.github.siloverse.fix
+package io.github.siloverse.fix.codec
 
 /**
  * Cuts a byte stream into message frames. TCP delivers bytes in arbitrary chunks; this

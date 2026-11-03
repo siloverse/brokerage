@@ -1,4 +1,8 @@
-package io.github.siloverse.fix
+package io.github.siloverse.fix.codec
+
+import io.github.siloverse.fix.message.FixField
+import io.github.siloverse.fix.message.FixMessage
+import io.github.siloverse.fix.message.Tag
 
 /**
  * Turns one complete frame of wire bytes into a [FixMessage], or throws

@@ -1,4 +1,4 @@
-package io.github.siloverse.fix
+package io.github.siloverse.fix.store
 
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -127,8 +127,4 @@ abstract class MessageStoreContract {
         assertEquals((1L..(threads * perThread)).toList(), all.map { it.seq })
         assertEquals(threads * perThread + 1L, store.nextOutbound())
     }
-}
-
-class InMemoryMessageStoreTest : MessageStoreContract() {
-    override fun store(): MessageStore = InMemoryMessageStore()
 }

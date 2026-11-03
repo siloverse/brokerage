@@ -1,7 +1,4 @@
-package io.github.siloverse.fix
-
-/** One outbound message as it went on the wire, with the sequence number it carried. */
-class StoredMessage(val seq: Long, val bytes: ByteArray)
+package io.github.siloverse.fix.store
 
 /**
  * What a session must remember across a crash: the two counters and every outbound
@@ -44,42 +41,4 @@ interface MessageStore {
 
     /** Both counters back to 1 and the outbound log emptied: the effect of Logon with 141=Y. */
     fun reset()
-}
-
-/** Keeps everything on the heap. Fine for tests and for a venue that may forget on restart. */
-class InMemoryMessageStore : MessageStore {
-
-    private val lock = Any()
-    private var nextOut = 1L
-    private var nextIn = 1L
-    private val log = java.util.TreeMap<Long, StoredMessage>()
-
-    override fun nextOutbound(): Long = synchronized(lock) { nextOut }
-
-    override fun nextExpectedInbound(): Long = synchronized(lock) { nextIn }
-
-    override fun append(encode: (seq: Long) -> ByteArray): StoredMessage = synchronized(lock) {
-        val seq = nextOut
-        val bytes = encode(seq)               // may throw: then nothing below happens
-        val stored = StoredMessage(seq, bytes)
-        log[seq] = stored
-        nextOut = seq + 1
-        stored
-    }
-
-    override fun outbound(from: Long, to: Long): List<StoredMessage> = synchronized(lock) {
-        val upper = if (to == 0L) Long.MAX_VALUE else to
-        log.subMap(from, true, upper, true).values.toList()
-    }
-
-    override fun setNextExpectedInbound(seq: Long) = synchronized(lock) {
-        require(seq >= 1) { "sequence numbers start at 1, got $seq" }
-        nextIn = seq
-    }
-
-    override fun reset() = synchronized(lock) {
-        nextOut = 1
-        nextIn = 1
-        log.clear()
-    }
 }
