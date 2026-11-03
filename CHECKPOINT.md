@@ -83,3 +83,40 @@ Open: I still want to see the "callback slows the venue" claim fail or hold in a
 — drill for 0.3b: bounded outbound queue, slow broker, watch venue latency.
 
 Next: `Venue.kt` + KDoc contract + `VenueContract` test fixture.
+
+## 2026-11-03 — 0.3b day 0: FIX session layer read, restart exercise
+
+Read: FIX Session Layer Technical Specification (June 2020), chapter 4 in full, 8.5–9 as
+reference. Summary in my words: connections, sessions, Logon/Logout; sequence counters,
+heartbeats, failure detection; resend, replay, gap fill, reset; validation, persistence,
+crash recovery, business idempotency.
+
+Exercise (broker crashed; store: inbound 4711 processed, outbound 300 sent; venue produced
+4712–4720 meanwhile):
+1. Broker sends Logon 35=A 34=301 — numbering survives a crash; expects inbound 4712.
+2. Venue replies Logon 34=4721; broker sees 4721 > 4712, queues the Logon, sends
+   ResendRequest 35=2 34=302 7=4712 16=0 (16=0 = "everything from here"; an explicit
+   16=4720 also works but assumes knowledge the broker lacks).
+3. Venue replays application reports with original 34, 43=Y, 122=OrigSendingTime, new 52.
+   Heartbeats in the range are not replayed: SequenceReset-GapFill 35=4 43=Y 123=Y 36=<next
+   real seq>. After 4720 and the queued Logon 4721, NextNumIn = 4722.
+4. Loops: venue assigns NEW seq numbers to replays (gap never closes); broker discards every
+   43=Y (throws away the fill); broker logs on with 300 or 1 (venue rejects, same state,
+   same failure).
+
+Follow-ups:
+- Write-ahead: broker sends 301, crashes before storing NextNumOut=302, logs on with 301
+  again → venue sees lower-than-expected without 43=Y → Logout + disconnect (spec "should").
+  Rule: durably store the message AND the counter advance BEFORE writing to the socket.
+  Storing only the counter avoids reuse but leaves nothing to replay.
+- Missing history: venue store starts at 4716 → it must send GapFill 35=4 34=4712 43=Y
+  123=Y 36=4716, then replay 4716–4720. Silence is not a recovery response: the broker
+  keeps expecting 4712 forever. Sequence synchronization is NOT business reconciliation:
+  the gap-filled range may have held fills → flag incomplete history, reconcile via
+  lookup / 2.7.
+- Already-applied trade re-delivered with 43=Y: two transactions. Session layer commits
+  inbox row + inbound counter together; business layer commits execution-id dedup key +
+  ledger + inbox "processed" together. Counter protects the session; execution id
+  (port guarantee 2) protects the money. This is the transactional inbox of chapter 8.
+
+Next: stage A, the wire, in a new `fix` module.
