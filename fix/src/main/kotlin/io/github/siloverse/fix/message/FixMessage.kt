@@ -1,26 +1,8 @@
-package io.github.siloverse.fix
+package io.github.siloverse.fix.message
 
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
-
-/** The byte that separates fields on the wire. Shown as `|` in logs and tests. */
-const val SOH: Char = '\u0001'
-
-/** FIX tags used by the wire and session layers. Application tags live with their users. */
-object Tag {
-    const val BEGIN_STRING = 8
-    const val BODY_LENGTH = 9
-    const val CHECK_SUM = 10
-    const val MSG_SEQ_NUM = 34
-    const val MSG_TYPE = 35
-    const val SENDER_COMP_ID = 49
-    const val TARGET_COMP_ID = 56
-    const val SENDING_TIME = 52
-}
-
-/** One `tag=value` pair. Values are always strings on the wire; typed reads live on [FixMessage]. */
-data class FixField(val tag: Int, val value: String)
 
 /**
  * An ordered list of fields. Order matters: the header must come first and repeating
@@ -31,7 +13,7 @@ class FixMessage(val fields: List<FixField>) {
 
     operator fun get(tag: Int): String? = fields.firstOrNull { it.tag == tag }?.value
 
-    fun require(tag: Int): String = get(tag) ?: throw FixGarbledException("missing tag $tag")
+    fun require(tag: Int): String = get(tag) ?: throw MissingTagException(tag)
 
     fun getInt(tag: Int): Int? = get(tag)?.toInt()
 
@@ -87,6 +69,3 @@ class FixMessage(val fields: List<FixField>) {
         fun parseUtcTimestamp(text: String): Instant = Instant.from(UTC_TIMESTAMP.parse(text))
     }
 }
-
-/** The bytes were not a valid FIX message. The session layer ignores garbled input; it never replies to it. */
-class FixGarbledException(message: String) : RuntimeException(message)

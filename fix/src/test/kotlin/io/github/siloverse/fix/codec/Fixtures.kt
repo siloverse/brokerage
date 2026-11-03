@@ -1,5 +1,7 @@
-package io.github.siloverse.fix
+package io.github.siloverse.fix.codec
 
+import io.github.siloverse.fix.message.FixField
+import io.github.siloverse.fix.message.FixMessage
 import java.time.Instant
 
 /** Known-good wire strings, lengths and checksums computed by hand from the spec rules. */

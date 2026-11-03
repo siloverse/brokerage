@@ -1,7 +1,7 @@
-package io.github.siloverse.fix
+package io.github.siloverse.fix.codec
 
-import io.github.siloverse.fix.Fixtures.readable
-import io.github.siloverse.fix.Fixtures.wire
+import io.github.siloverse.fix.codec.Fixtures.readable
+import io.github.siloverse.fix.codec.Fixtures.wire
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
