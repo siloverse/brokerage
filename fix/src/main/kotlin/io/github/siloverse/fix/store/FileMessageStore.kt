@@ -14,24 +14,26 @@ import java.util.TreeMap
  * A [MessageStore] that survives a process restart. Two append-only files in [directory]:
  *
  * - `messages.log`: one record per sent message, `seq (8) | length (4) | bytes`.
- * - `counters.log`: one record per counter change, `nextExpectedInbound (8) | nextOutbound (8)`.
+ * - `inbound.log`: one record per change of the expected inbound number, `seq (8)`.
  *
- * Recovery reads the last complete record of each file. A torn record at the tail (crash
- * mid-write) is cut off. The outbound number is the larger of the counters record and
- * the last message seq plus one, so a crash between the two writes is harmless either way.
+ * Each file owns exactly one fact: `messages.log` is the only source of the outbound
+ * number (last record's seq plus one), `inbound.log` the only source of the inbound one.
+ * No fact lives in two files, so the two writes never need a transaction around them.
+ * Recovery reads the last complete record of each file; a torn tail (crash mid-write) is
+ * cut off.
  *
  * Durability: `messages.log` is forced to disk on every [append], because a reused
- * outbound number ends the session. `counters.log` is appended on every change but not
+ * outbound number ends the session. `inbound.log` is appended on every change but not
  * forced: losing the tail only makes this side ask for a resend it did not need, which
  * the peer answers with PossDup messages and the application deduplicates.
  *
- * `counters.log` grows by 16 bytes per inbound message; [reset] truncates both files.
+ * `inbound.log` grows by 8 bytes per inbound message; [reset] truncates both files.
  */
 class FileMessageStore(directory: Path) : MessageStore, Closeable {
 
     private val lock = Any()
     private val messages: FileChannel
-    private val counters: FileChannel
+    private val inbound: FileChannel
     private val index = TreeMap<Long, Pair<Long, Int>>()   // seq -> (offset of payload, length)
     private var nextOut = 1L
     private var nextIn = 1L
@@ -39,7 +41,7 @@ class FileMessageStore(directory: Path) : MessageStore, Closeable {
     init {
         Files.createDirectories(directory)
         messages = FileChannel.open(directory.resolve("messages.log"), CREATE, READ, WRITE)
-        counters = FileChannel.open(directory.resolve("counters.log"), CREATE, READ, WRITE)
+        inbound = FileChannel.open(directory.resolve("inbound.log"), CREATE, READ, WRITE)
         recover()
     }
 
@@ -57,7 +59,6 @@ class FileMessageStore(directory: Path) : MessageStore, Closeable {
         messages.force(false)
         index[seq] = (recordStart + MESSAGE_HEADER) to bytes.size
         nextOut = seq + 1
-        appendCounters()
         StoredMessage(seq, bytes)
     }
 
@@ -79,40 +80,39 @@ class FileMessageStore(directory: Path) : MessageStore, Closeable {
     override fun setNextExpectedInbound(seq: Long) = synchronized(lock) {
         require(seq >= 1) { "sequence numbers start at 1, got $seq" }
         nextIn = seq
-        appendCounters()
+        appendInbound()
     }
 
     override fun reset() = synchronized(lock) {
         messages.truncate(0)
         messages.force(false)
-        counters.truncate(0)
+        inbound.truncate(0)
         index.clear()
         nextOut = 1
         nextIn = 1
-        appendCounters()
+        appendInbound()
     }
 
     override fun close() = synchronized(lock) {
         messages.close()
-        counters.close()
+        inbound.close()
     }
 
-    private fun appendCounters() {
-        writeFully(counters, ByteBuffer.allocate(COUNTERS_RECORD).putLong(nextIn).putLong(nextOut).flip())
+    private fun appendInbound() {
+        writeFully(inbound, ByteBuffer.allocate(INBOUND_RECORD).putLong(nextIn).flip())
     }
 
     private fun recover() {
-        // counters.log: last complete record wins; a torn tail is cut off.
-        val countersSize = counters.size()
-        val complete = countersSize - countersSize % COUNTERS_RECORD
+        // inbound.log: last complete record wins; a torn tail is cut off.
+        val inboundSize = inbound.size()
+        val complete = inboundSize - inboundSize % INBOUND_RECORD
         if (complete > 0) {
-            val last = ByteBuffer.allocate(COUNTERS_RECORD)
-            counters.read(last, complete - COUNTERS_RECORD)
+            val last = ByteBuffer.allocate(INBOUND_RECORD)
+            inbound.read(last, complete - INBOUND_RECORD)
             last.flip()
             nextIn = last.getLong()
-            nextOut = last.getLong()
         }
-        if (complete < countersSize) counters.truncate(complete)
+        if (complete < inboundSize) inbound.truncate(complete)
 
         // messages.log: rebuild the index; stop at the first torn record.
         val size = messages.size()
@@ -132,7 +132,7 @@ class FileMessageStore(directory: Path) : MessageStore, Closeable {
             messages.truncate(position)
             messages.force(false)
         }
-        if (index.isNotEmpty()) nextOut = maxOf(nextOut, index.lastKey() + 1)
+        nextOut = if (index.isEmpty()) 1L else index.lastKey() + 1
     }
 
     /** Positional write at the end of the file: READ and APPEND cannot be combined on a FileChannel. */
@@ -143,6 +143,6 @@ class FileMessageStore(directory: Path) : MessageStore, Closeable {
 
     private companion object {
         const val MESSAGE_HEADER = Long.SIZE_BYTES + Int.SIZE_BYTES
-        const val COUNTERS_RECORD = Long.SIZE_BYTES * 2
+        const val INBOUND_RECORD = Long.SIZE_BYTES
     }
 }

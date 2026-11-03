@@ -64,13 +64,13 @@ class FileMessageStoreTest : MessageStoreContract() {
     }
 
     @Test
-    fun `a torn counters record is ignored and the message log still sets the outbound number`() {
+    fun `a torn inbound record is ignored and the message log sets the outbound number`() {
         val dir = root.resolve("torn-counters")
         FileMessageStore(dir).use { store ->
             repeat(5) { store.append(::bytesFor) }
             store.setNextExpectedInbound(77)
         }
-        FileChannel.open(dir.resolve("counters.log"), WRITE, APPEND).use { channel ->
+        FileChannel.open(dir.resolve("inbound.log"), WRITE, APPEND).use { channel ->
             channel.write(java.nio.ByteBuffer.allocate(5).put("12345".toByteArray()).flip())
         }
 
@@ -81,11 +81,11 @@ class FileMessageStoreTest : MessageStoreContract() {
     }
 
     @Test
-    fun `a lost counters tail cannot reuse an outbound number`() {
+    fun `a lost inbound file cannot reuse an outbound number`() {
         val dir = root.resolve("lost-counters")
         FileMessageStore(dir).use { store -> repeat(4) { store.append(::bytesFor) } }
-        // Counters file lost entirely; the message log is the authority for outbound.
-        Files.delete(dir.resolve("counters.log"))
+        // Inbound file lost entirely; the message log alone owns the outbound number.
+        Files.delete(dir.resolve("inbound.log"))
 
         FileMessageStore(dir).use { store ->
             assertEquals(5L, store.nextOutbound())
@@ -103,7 +103,7 @@ class FileMessageStoreTest : MessageStoreContract() {
         }
 
         assertEquals(0L, Files.size(dir.resolve("messages.log")))
-        assertEquals(16L, Files.size(dir.resolve("counters.log")))
+        assertEquals(8L, Files.size(dir.resolve("inbound.log")))
         FileMessageStore(dir).use { store ->
             assertEquals(1L, store.nextOutbound())
             assertEquals(1L, store.nextExpectedInbound())
