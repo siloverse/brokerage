@@ -120,3 +120,36 @@ Follow-ups:
   (port guarantee 2) protects the money. This is the transactional inbox of chapter 8.
 
 Next: stage A, the wire, in a new `fix` module.
+
+## 2026-11-03 — 0.3b stages A and B: the wire and the session layer
+
+`fix` module, no Spring, no brokerage dependency. Packages by responsibility: `message`
+(data model) ← `codec` (encoder, decoder, framer) ← `session` (state machine, message
+factories) ; `store` (persistence) and `transport` (bytes in/out) stand alone.
+
+Decisions:
+- `MessageStore.append(encode)` hands out the number, persists message + counter advance,
+  then returns: the write-ahead rule from the exercise, expressed in the type.
+- File store = two append-only files, Awais's layout. Each file owns ONE fact
+  (`messages.log` → outbound number, `inbound.log` → inbound number), so the two appends
+  never need a transaction. Rule learned: when two writes seem to need a transaction,
+  check whether one is a copy; delete the copy instead.
+- Durability split: messages.log fsync per append (reused number = dead session);
+  inbound.log not forced (lost tail = one harmless over-sized resend, absorbed by ExecID
+  dedup). Measure the fsync floor in stage D.
+- `FixSession` is a pure state machine (option 2): `connect / onBytes / onTick / send /
+  logout / disconnected` → `SessionOutput`. The driver owns threads, transport and clock.
+  Same shape the chapter 3 engine will have. Every rule is a deterministic test, no sleeps.
+- Session rules as tests: store-before-send; in-order; gap → hold + one ResendRequest +
+  drain; too-low with PossDup ignored, without → Logout; resend replays app messages with
+  43=Y/122 and gap-fills admin + holes; heartbeat / TestRequest / disconnect on silence;
+  Logon negotiates the interval (acceptor wins), 141=Y resets both and is echoed.
+- Bug found by test: silence threshold used the configured interval, not the negotiated
+  one. The acceptor's 20 s beat the initiator's 30 s and the TestRequest came 12 s late.
+
+Stage B exit test green: 10 messages, link cut between 6 and 7, reconnect, each delivered
+once, 7–10 PossDup, the heartbeat gap-filled. Day-0 exercise replayed as a test: broker
+restarts from its store, logs on with the right number, detects the gap, recovers.
+
+Open for stage C: the driver (threads + transport + reconnect/backoff), acceptor accepting
+one session per CompID pair, application-level resend (spec 4.9) left to the application.
