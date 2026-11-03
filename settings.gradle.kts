@@ -52,5 +52,6 @@ include(
     ":portfolio",
     ":engine",
     ":app",
-    ":venue"
+    ":venue",
+    ":fix"
 )
