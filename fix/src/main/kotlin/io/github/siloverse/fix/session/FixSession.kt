@@ -59,6 +59,8 @@ class FixSession(
     private var testRequestCounter = 0L
     private var resendOutstanding = false
     private var resetSentOnLogon = false
+    private var forceResetOnNextLogon = false
+    private var logonConsumedByReset = false
     private val held = TreeMap<Long, FixMessage>()
     private var gapFillTarget: Long? = null
 
@@ -88,6 +90,16 @@ class FixSession(
                 SessionOutput.NONE
             }
         }
+    }
+
+    /**
+     * Acceptor only: on the next Logon, reset both stores to 1 and answer with 141=Y even
+     * though the peer did not ask. The operator's "we lost our sequence state" button, and
+     * a stage D chaos knob. The peer accepts the reset as spec 4.4.3 allows.
+     */
+    fun forceResetOnNextLogon() {
+        check(config.role == SessionRole.ACCEPTOR) { "only an acceptor can impose a reset" }
+        forceResetOnNextLogon = true
     }
 
     /** The transport is gone, for whatever reason. Counters survive; the connection state does not. */
@@ -176,6 +188,9 @@ class FixSession(
                 SessionState.LOGON_SENT, SessionState.AWAITING_LOGON -> output += acceptLogon(message, now)
                 else -> return logoutAndDisconnect(now, "Logon while $state")
             }
+            // A reset this side forced: the peer's Logon carried its OLD number and must not be
+            // judged against the fresh counters. Both sides now continue from 1.
+            if (logonConsumedByReset) { logonConsumedByReset = false; return output }
         } else if (state == SessionState.LOGON_SENT || state == SessionState.AWAITING_LOGON) {
             return logoutAndDisconnect(now, "first message must be Logon, got ${header.type}")
         }
@@ -251,13 +266,18 @@ class FixSession(
         var output = SessionOutput.NONE
         when (config.role) {
             SessionRole.ACCEPTOR -> {
-                if (peerReset) store.reset()
+                val reset = peerReset || forceResetOnNextLogon
+                if (reset) store.reset()
+                if (forceResetOnNextLogon && !peerReset) logonConsumedByReset = true
+                forceResetOnNextLogon = false
                 heartBtInt = config.heartBtInt   // the acceptor's interval wins
                 state = SessionState.ACTIVE
-                output += emit(now) { seq -> SessionMessages.logon(sender, target, seq, now, heartBtInt.seconds.toInt(), peerReset) }
+                output += emit(now) { seq -> SessionMessages.logon(sender, target, seq, now, heartBtInt.seconds.toInt(), reset) }
             }
             SessionRole.INITIATOR -> {
                 if (resetSentOnLogon && !peerReset) return logoutAndDisconnect(now, "peer did not acknowledge sequence reset")
+                // The acceptor may impose a reset we did not ask for (4.4.3): accept it, both sides restart at 1.
+                if (peerReset && !resetSentOnLogon) store.reset()
                 heartBtInt = Duration.ofSeconds(peerInterval.toLong())
                 state = SessionState.ACTIVE
             }

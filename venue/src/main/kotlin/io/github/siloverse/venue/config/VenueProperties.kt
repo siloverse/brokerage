@@ -14,6 +14,8 @@ data class VenueProperties(
     val targetCompId: String = "BROKER",
     val heartBtInt: Duration = Duration.ofSeconds(30),
     val storeDir: Path = Path.of("build/venue-fix-store"),
+    /** Pending outbound chunks before the broker counts as a slow consumer and is dropped. 0 = write inline. */
+    val outboundQueueLimit: Int = 10_000,
     val engine: Engine = Engine(),
 ) {
     data class Engine(

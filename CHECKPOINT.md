@@ -182,3 +182,41 @@ one session per CompID pair, application-level resend (spec 4.9) left to the app
 
 Next: stage D — chaos knobs on the venue's admin endpoint, guarantees 2 and 4 in the
 contract, and the "do callbacks slow the venue" measurement.
+
+## 2026-11-04 — 0.3b stage D: chaos knobs and the slow-consumer measurement
+
+- `ChaosKnobs` on the engine, live through `PUT /admin/chaos` on the venue's HTTP port:
+  fillDelay, partialFills, rejectRate, duplicateReportRate (same ExecID twice, new seq),
+  phantomReportRate (a Trade for a FILLED order, ExecID `P-n`, order untouched). Actions:
+  `/drop-connection` (socket closed, no Logout), `/reset-sequences` (venue forgets its
+  counters; next Logon answered with 141=Y; the broker accepts the imposed reset, both
+  restart at 1 — spec 4.4.3, now a FixSession feature with a test), `/price/{symbol}/{mid}`.
+- Contract guarantees 2 and 4 added to `VenueContract` behind an `induceDuplicateReports()`
+  hook: a report delivered twice carries the same ExecutionId and content under a new
+  sequence number. Six contract tests green against the FIX stack; the in-process engine
+  (chapter 3) will skip these two until it can be told to duplicate.
+- `SessionDriver` grew a bounded outbound queue with a writer thread (`outboundQueueLimit`,
+  0 = inline for comparison). A full queue drops the peer as a "slow consumer"; the store
+  has every message, so the peer recovers by resend. Logout still flushes through the queue.
+
+**The measurement** (broker listener sleeps 50 ms per report; 16 KB socket buffers so the
+burst cannot hide in the kernel; venue sends as fast as it can for 3 s):
+
+| mode | sends returned | send p50 | send p99 | outcome |
+|---|---|---|---|---|
+| inline (write under the lock) | 456 | 83 µs | 243 µs | sender WEDGED in a socket write, lock held, 0 heartbeats, no disconnect — the venue is hostage |
+| queue = 2000 | 2482 | 14 µs | 94 µs | queue full → `Disconnect(slow consumer)`, venue free |
+
+First attempt with default (multi-MB) buffers was also instructive: 20,000 reports never
+blocked at all, and both modes lost the broker by the heartbeat rule ~2.4 s later, because
+its reader thread was stuck in the slow listener and never answered the TestRequest.
+
+Verdict on "callbacks slow the venue" (my 0.3 answer): FALSE as stated, TRUE in one specific
+shape. A push does not cost the venue anything while the consumer keeps up or the buffers
+absorb the burst. It costs everything the moment a blocking write happens inside the
+session's critical section. The fix is not polling: it is a bounded queue, a writer thread,
+and the decision to drop a consumer that cannot keep up, which sequence numbers make safe.
+Same lesson as the conflated feed in the interview (Q3): bound the queue, disconnect the
+slow client, let it resume from a sequence number.
+
+0.3b DONE. Chapter 0 left: 0.4 numbers sheet, 0.4b load generator, 0.6 reflect.

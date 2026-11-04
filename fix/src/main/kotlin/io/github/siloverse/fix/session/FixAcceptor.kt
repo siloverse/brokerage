@@ -18,7 +18,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * registered for that counterparty. A counterparty that already has a live connection,
  * or one nobody registered, is dropped without a reply.
  */
-class FixAcceptor(private val port: Int = 0) {
+/** [socketBufferBytes] shrinks each connection's kernel buffers: only for the slow-consumer drill. */
+class FixAcceptor(private val port: Int = 0, private val socketBufferBytes: Int? = null) {
 
     private class Registered(val driver: SessionDriver)
 
@@ -31,9 +32,9 @@ class FixAcceptor(private val port: Int = 0) {
     val localPort: Int get() = server?.localPort ?: port
 
     /** Register the session that will serve connections from [config]'s TargetCompID. */
-    fun register(config: SessionConfig, store: MessageStore, listener: SessionListener): SessionDriver {
+    fun register(config: SessionConfig, store: MessageStore, listener: SessionListener, outboundQueueLimit: Int = 10_000): SessionDriver {
         require(config.role == SessionRole.ACCEPTOR) { "acceptor needs an ACCEPTOR config" }
-        val driver = SessionDriver(FixSession(config, store), listener)
+        val driver = SessionDriver(FixSession(config, store), listener, outboundQueueLimit = outboundQueueLimit)
         check(sessions.putIfAbsent(config.targetCompId, Registered(driver)) == null) { "session for ${config.targetCompId} already registered" }
         return driver
     }
@@ -57,7 +58,7 @@ class FixAcceptor(private val port: Int = 0) {
     private fun acceptLoop(socket: ServerSocket) {
         while (running.get()) {
             val transport = try {
-                SocketTransport.accept(socket)
+                SocketTransport.accept(socket, socketBufferBytes)
             } catch (e: IOException) {
                 if (running.get()) continue else return
             }

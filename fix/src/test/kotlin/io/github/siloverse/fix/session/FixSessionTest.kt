@@ -75,6 +75,34 @@ class FixSessionTest {
         assertEquals(MsgType.LOGOUT, decode(link.toBroker.single()).msgType)
     }
 
+    @Test
+    fun `7 - an acceptor-imposed reset restarts both sides at 1 and the initiator accepts it`() {
+        val link = SessionLink()
+        link.connect()
+        repeat(4) { link.brokerSends(ORDER, 11 to "o$it") }
+        link.pump()
+        assertEquals(6L, link.broker.nextOutbound)
+        link.dropConnection()
+
+        link.venue.forceResetOnNextLogon()
+        link.connect()   // broker logs on with 6; venue resets, answers Logon seq 1 with 141=Y
+
+        assertEquals(SessionState.ACTIVE, link.broker.state)
+        assertEquals(SessionState.ACTIVE, link.venue.state)
+        assertEquals("Y", decode(link.venueStore.outbound(1, 1).single().bytes)[Tag.RESET_SEQ_NUM_FLAG])
+        assertEquals(1L, link.broker.nextOutbound)
+        assertEquals(2L, link.broker.nextExpectedInbound)
+        assertEquals(1L, link.venue.nextExpectedInbound)
+        assertEquals(2L, link.venue.nextOutbound)
+
+        link.brokerSends(ORDER, 11 to "after")
+        link.venueSends(REPORT, 17 to "e-after")
+        link.pump()
+        assertEquals("after", link.venueApp.last()[11])
+        assertEquals("e-after", link.brokerApp.last()[17])
+        assertTrue(link.brokerEvents.none { it is SessionEvent.Disconnect })
+    }
+
     // ---- rule 1: store before send -------------------------------------------------------
 
     @Test
