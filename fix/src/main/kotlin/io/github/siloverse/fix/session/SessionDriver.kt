@@ -102,9 +102,15 @@ class SessionDriver(
                 return
             }
         }
-        output.applicationMessages.forEach(listener::onMessage)
+        for (message in output.applicationMessages) {
+            try {
+                listener.onMessage(message)
+            } catch (e: Exception) {
+                runCatching { listener.onEvent(SessionEvent.ListenerFailed("message ${message.seqNum} (${message.msgType})", e)) }
+            }
+        }
         for (event in output.events) {
-            listener.onEvent(event)
+            runCatching { listener.onEvent(event) }
             if (event is SessionEvent.Disconnect) closeTransport()
         }
     }

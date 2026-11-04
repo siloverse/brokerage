@@ -6,6 +6,7 @@ plugins {
 }
 
 dependencies {
+    implementation(project(":fix"))
     implementation(platform(local.spring.modulith.bom))
     implementation(local.spring.modulith.starter.core)
     api(local.kotlinx.coroutines.core)

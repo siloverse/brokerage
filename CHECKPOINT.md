@@ -153,3 +153,32 @@ restarts from its store, logs on with the right number, detects the gap, recover
 
 Open for stage C: the driver (threads + transport + reconnect/backoff), acceptor accepting
 one session per CompID pair, application-level resend (spec 4.9) left to the application.
+
+## 2026-11-04 — 0.3b stage C: order flow over FIX, the port proven end to end
+
+- `fix.order`: the order-flow constants (tags, ExecType, OrdStatus, side, ord type) in the
+  `fix` module because both sides speak them; meaning stays with the users.
+- `venue.engine.VenueEngine`: the fake exchange as a pure state machine (messages + ticks
+  in, replies out). Random-walk mid per instrument, pinned by `priceStep = 0`; crossing
+  orders fill at the mid after `fillDelay`, in 1 or 2 executions; resting orders checked
+  per tick and expired at the session close; duplicate ClOrdID → ExecType=I with the same
+  OrderID (guarantee 1); cancel of a done order → OrderCancelReject; OrderStatusRequest →
+  ExecType=I, unknown order → OrdStatus=8 + text "unknown order". 10 tests.
+- `venue.fix.VenueFixServer`: acceptor + one session + engine; ticker drives fills. Replies
+  are dropped while the broker is not logged on; the broker asks for status on return (2.6).
+- `orders.venue.fix.FixVenue : Venue` (internal package, as decided in 0.3): submit waits
+  for the first report with that ClOrdID to learn OrderID; lookup = OrderStatusRequest;
+  executions() = shared flow with bounded replay; VenueUnavailableException is the "we do
+  not know" outcome. `FixMapping` is the only file that knows FIX tags on the broker side.
+- Test-only exception journaled: `venue` depends on `orders` + its test fixtures in
+  `testImplementation` only, so the Venue port's contract runs here against the real FIX
+  stack over a TCP socket. All four contract tests green.
+- Two things the tests caught: (1) `runTest`'s virtual clock fires `withTimeout` the moment
+  a coroutine waits on a real thread — the port's contract must run under `runBlocking`;
+  (2) a listener that throws used to kill the driver's reader thread silently — now a
+  `ListenerFailed` event, session carries on.
+- Known gap: an ExecType=I answer carries no execution list, so `lookup().executions` is
+  empty until the daily execution file (plan 2.7). Documented in FixMapping.
+
+Next: stage D — chaos knobs on the venue's admin endpoint, guarantees 2 and 4 in the
+contract, and the "do callbacks slow the venue" measurement.
