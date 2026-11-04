@@ -1,4 +1,4 @@
-package io.github.siloverse.brokerage.orders.application
+package io.github.siloverse.brokerage.orders.application.venue
 
 /**
  * The venue did not answer in time, or the session is down. This is the "we do not know"
