@@ -26,18 +26,20 @@ class SocketTransport(private val socket: Socket) : Transport {
     companion object {
         private const val READ_CHUNK = 8 * 1024
 
-        /** Initiator side: connect to [host]:[port]. */
-        fun connect(host: String, port: Int, timeoutMillis: Int = 5_000): SocketTransport {
+        /** Initiator side: connect to [host]:[port]. [bufferBytes] shrinks the kernel buffers, for drills. */
+        fun connect(host: String, port: Int, timeoutMillis: Int = 5_000, bufferBytes: Int? = null): SocketTransport {
             val socket = Socket()
             socket.tcpNoDelay = true
+            bufferBytes?.let { socket.receiveBufferSize = it; socket.sendBufferSize = it }
             socket.connect(InetSocketAddress(host, port), timeoutMillis)
             return SocketTransport(socket)
         }
 
         /** Acceptor side: wait for one connection on [server]. */
-        fun accept(server: ServerSocket): SocketTransport {
+        fun accept(server: ServerSocket, bufferBytes: Int? = null): SocketTransport {
             val socket = server.accept()
             socket.tcpNoDelay = true
+            bufferBytes?.let { socket.receiveBufferSize = it; socket.sendBufferSize = it }
             return SocketTransport(socket)
         }
     }

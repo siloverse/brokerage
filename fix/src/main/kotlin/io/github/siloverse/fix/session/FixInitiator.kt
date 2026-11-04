@@ -20,6 +20,7 @@ class FixInitiator(
     private val port: Int,
     private val backoff: Duration = Duration.ofSeconds(1),
     private val maxBackoff: Duration = Duration.ofSeconds(30),
+    private val socketBufferBytes: Int? = null,
 ) {
     init { require(config.role == SessionRole.INITIATOR) { "initiator needs an INITIATOR config" } }
 
@@ -49,7 +50,7 @@ class FixInitiator(
         var delay = backoff
         while (running.get()) {
             val transport = try {
-                SocketTransport.connect(host, port)
+                SocketTransport.connect(host, port, bufferBytes = socketBufferBytes)
             } catch (e: IOException) {
                 if (!sleep(delay)) return
                 delay = minOf(delay.multipliedBy(2), maxBackoff)

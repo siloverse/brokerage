@@ -50,4 +50,9 @@ class FixVenueContractTest : VenueContract() {
     }
 
     override fun venue(): Venue = venue
+
+    override fun induceDuplicateReports(): Boolean {
+        server.engine.knobs.duplicateReportRate = 1.0
+        return true
+    }
 }

@@ -28,8 +28,10 @@ class VenueFixServer(
     fixPort: Int,
     private val tickInterval: Duration = Duration.ofMillis(100),
     private val clock: () -> Instant = Instant::now,
+    outboundQueueLimit: Int = 10_000,
+    socketBufferBytes: Int? = null,
 ) {
-    private val acceptor = FixAcceptor(fixPort)
+    private val acceptor = FixAcceptor(fixPort, socketBufferBytes)
     private val lock = Any()
     private val ticker = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "venue-engine-ticker").apply { isDaemon = true } }
     val driver: SessionDriver
@@ -41,11 +43,28 @@ class VenueFixServer(
                 val replies = synchronized(lock) { engine.handle(message, clock()) }
                 send(replies)
             }
-            override fun onEvent(event: SessionEvent) { /* stage D: log and count */ }
-        })
+            override fun onEvent(event: SessionEvent) { events += event }
+        }, outboundQueueLimit)
     }
 
     val port: Int get() = acceptor.localPort
+
+    /** Session events seen so far, newest last; the admin endpoint and tests read them. */
+    val events = java.util.concurrent.CopyOnWriteArrayList<SessionEvent>()
+
+    // ---- chaos actions ----------------------------------------------------------------------
+
+    /** Close the broker's socket now, without a Logout. */
+    fun dropConnection() = driver.detach()
+
+    /** Forget our sequence state: the next Logon from the broker is answered with 141=Y and both sides restart at 1. */
+    fun resetSequences() {
+        driver.session.forceResetOnNextLogon()
+        driver.detach()
+    }
+
+    /** Pin an instrument's mid price. */
+    fun pinPrice(symbol: String, mid: Long) = synchronized(lock) { engine.prices.set(symbol, mid) }
 
     fun start() {
         acceptor.start()

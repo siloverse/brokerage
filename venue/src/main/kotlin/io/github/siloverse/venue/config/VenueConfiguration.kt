@@ -31,6 +31,7 @@ class VenueConfiguration {
         sessionConfig = SessionConfig(properties.senderCompId, properties.targetCompId, SessionRole.ACCEPTOR, properties.heartBtInt),
         store = FileMessageStore(properties.storeDir.resolve("${properties.senderCompId}-${properties.targetCompId}")),
         fixPort = properties.fixPort,
+        outboundQueueLimit = properties.outboundQueueLimit,
     )
 
     @Bean

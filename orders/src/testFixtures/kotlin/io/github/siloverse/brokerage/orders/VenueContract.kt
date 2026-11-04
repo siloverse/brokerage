@@ -1,6 +1,8 @@
 package io.github.siloverse.brokerage.orders
 
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
@@ -24,6 +26,13 @@ abstract class VenueContract {
     protected abstract fun venue(): Venue
 
     protected open val instrument = Instrument("ACME")
+
+    /**
+     * Make the venue under test deliver every Trade report twice. Return false when the
+     * implementation cannot be told to (the in-process engine, for one); guarantees 2 and 4
+     * are then skipped, not failed.
+     */
+    protected open fun induceDuplicateReports(): Boolean = false
 
     private fun order(
         id: ClientOrderId = ClientOrderId(UUID.randomUUID().toString()),
@@ -57,6 +66,28 @@ abstract class VenueContract {
         val sequences = reports.map { it.sequence.value }
         assertEquals(sequences.sorted(), sequences)
         assertEquals(sequences.distinct(), sequences)
+    }
+
+    @Test
+    fun `guarantees 2 and 4 - a report delivered twice carries the same execution id and content, under new sequence numbers`() = runBlocking {
+        org.junit.jupiter.api.Assumptions.assumeTrue(induceDuplicateReports(), "this venue cannot be told to duplicate")
+        val venue = venue()
+        val order = order()
+        venue.submit(order)
+
+        val trades = withTimeout(5_000) {
+            venue.executions()
+                .filter { it.clientOrderId == order.clientOrderId && it is ExecutionReport.Trade }
+                .map { it as ExecutionReport.Trade }
+                .take(2)
+                .toList()
+        }
+
+        // Guarantee 2: the venue's id for the execution never changes, so the broker can dedupe on it.
+        assertEquals(trades[0].executionId, trades[1].executionId)
+        assertEquals(trades[0].copy(sequence = trades[1].sequence, venueTime = trades[1].venueTime), trades[1])
+        // Guarantee 4: it really was delivered twice, as two session messages.
+        assertTrue(trades[1].sequence.value > trades[0].sequence.value)
     }
 
     @Test

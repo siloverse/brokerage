@@ -22,9 +22,13 @@ import java.time.ZonedDateTime
  * ClOrdID gets the same OrderID back and no second order; an OrderStatusRequest is
  * answered with ExecType=I.
  */
-class VenueEngine(private val config: EngineConfig) {
+class VenueEngine(
+    private val config: EngineConfig,
+    val knobs: ChaosKnobs = ChaosKnobs(fillDelay = config.fillDelay, partialFills = config.partialFills),
+) {
 
     val prices = PriceFeed(config.startPrice, config.priceStep, config.seed)
+    private val chaos = kotlin.random.Random(config.seed xor 0x5EED)
     private val byClOrdId = LinkedHashMap<String, VenueOrder>()
     private val byOrderId = HashMap<String, VenueOrder>()
     private var orderCounter = 0L
@@ -47,6 +51,9 @@ class VenueEngine(private val config: EngineConfig) {
         val replies = mutableListOf<VenueReply>()
         val closeNow = now >= sessionCloseOn(now)
         for (order in byClOrdId.values) {
+            if (order.status == OrdStatus.FILLED && knobs.phantomReportRate > 0 && chaos.nextDouble() < knobs.phantomReportRate) {
+                replies += phantomFill(order, now)
+            }
             if (order.status.isTerminal) continue
             if (closeNow) {
                 order.status = OrdStatus.EXPIRED
@@ -54,7 +61,7 @@ class VenueEngine(private val config: EngineConfig) {
                 continue
             }
             val mid = prices.mid(order.symbol)
-            if (order.fillDueAt == null && order.crosses(mid)) order.fillDueAt = now.plus(config.fillDelay)
+            if (order.fillDueAt == null && order.crosses(mid)) order.fillDueAt = now.plus(knobs.fillDelay)
             val due = order.fillDueAt ?: continue
             if (now < due) continue
             if (!order.crosses(mid)) { order.fillDueAt = null; continue }   // price ran away during the delay
@@ -79,6 +86,7 @@ class VenueEngine(private val config: EngineConfig) {
         if ((message[OrderTag.TIME_IN_FORCE] ?: FixOrdType.DAY) != FixOrdType.DAY) return listOf(rejectNew(message, "only DAY orders", now))
         if (quantity <= 0 || price <= 0) return listOf(rejectNew(message, "quantity and price must be positive", now))
         if (now >= sessionCloseOn(now)) return listOf(rejectNew(message, "session closed", now))
+        if (knobs.rejectRate > 0 && chaos.nextDouble() < knobs.rejectRate) return listOf(rejectNew(message, "chaos: rejected on purpose", now))
 
         val order = VenueOrder("V-${++orderCounter}", clOrdId, symbol, side == FixSide.BUY, quantity, price, now)
         byClOrdId[clOrdId] = order
@@ -86,8 +94,8 @@ class VenueEngine(private val config: EngineConfig) {
         val replies = mutableListOf(report(order, ExecType.NEW, now))
         // An immediately crossing order with no delay fills in the same breath: the "fill before accept" ordering is real.
         if (order.crosses(prices.mid(symbol))) {
-            order.fillDueAt = now.plus(config.fillDelay)
-            if (config.fillDelay.isZero) replies += fill(order, prices.mid(symbol), now)
+            order.fillDueAt = now.plus(knobs.fillDelay)
+            if (knobs.fillDelay.isZero) replies += fill(order, prices.mid(symbol), now)
         }
         return replies
     }
@@ -116,13 +124,21 @@ class VenueEngine(private val config: EngineConfig) {
 
     private fun fill(order: VenueOrder, mid: Long, now: Instant): List<VenueReply> {
         val remaining = order.leavesQty
-        val quantity = if (config.partialFills == 2 && order.executions.isEmpty() && remaining > 1) remaining / 2 else remaining
+        val quantity = if (knobs.partialFills == 2 && order.executions.isEmpty() && remaining > 1) remaining / 2 else remaining
         val execution = VenueOrder.Execution("E-${++execCounter}", quantity, mid, now)
         order.executions += execution
         order.cumQty += quantity
         order.status = if (order.cumQty >= order.quantity) OrdStatus.FILLED else OrdStatus.PARTIALLY_FILLED
-        if (order.status == OrdStatus.PARTIALLY_FILLED) order.fillDueAt = now.plus(config.fillDelay)
-        return listOf(report(order, ExecType.TRADE, now, execution))
+        if (order.status == OrdStatus.PARTIALLY_FILLED) order.fillDueAt = now.plus(knobs.fillDelay)
+        val trade = report(order, ExecType.TRADE, now, execution)
+        // Chaos: the same fact twice. Same ExecID; the session gives the copy a new sequence number.
+        return if (knobs.duplicateReportRate > 0 && chaos.nextDouble() < knobs.duplicateReportRate) listOf(trade, trade) else listOf(trade)
+    }
+
+    /** Chaos: a Trade for an order that is already done. Not recorded on the order; the broker must refuse it. */
+    private fun phantomFill(order: VenueOrder, now: Instant): VenueReply {
+        val phantom = VenueOrder.Execution("P-${++execCounter}", 1, prices.mid(order.symbol), now)
+        return report(order, ExecType.TRADE, now, phantom)
     }
 
     private fun report(order: VenueOrder, execType: ExecType, now: Instant, execution: VenueOrder.Execution? = null): VenueReply =
