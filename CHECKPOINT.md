@@ -244,3 +244,13 @@ slow client, let it resume from a sequence number.
   map now shows `NamedInterface: name=api` on all five. 121 tests green.
 - Rule worth remembering: an `api` DTO is self-contained. Modulith would reject
   `ledger.domain.Money` in another module anyway, so `api` types cannot lean on `domain`.
+- Reviewed how a few production services organise their packages before settling the inner
+  layout. Flat technical-role packages at the root (builder, mapper, projector, consumer) and
+  a `domain` that also holds persistence and framework code scale by file count only; the
+  readable parts were always the feature slices. Rule adopted for brokerage: inside
+  `application` and `domain`, sub-packages are concepts or use cases, never roles; role names
+  only inside `infrastructure` feature slices; split at about a dozen files; create a
+  sub-package when its chapter starts. First application of it: the port and its vocabulary
+  moved to `orders.application.venue`, leaving room for `placement` and `reconciliation`.
+  Worth borrowing in chapter 2: a command → executor state machine with a per-state table of
+  allowed commands, with the table kept in one tested domain file.

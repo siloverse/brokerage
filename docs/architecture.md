@@ -38,10 +38,17 @@ When a chapter needs an exception, write it down here first.
 - `api` is what other modules may import. Nothing else in the module is visible to them.
 - `application` owns the use cases and the **outbound ports** those use cases need. A port
   is an interface written in the consumer's words (the Venue port lives in
-  `orders.application`).
+  `orders.application.venue`).
 - `domain` keeps business rules free of Spring, persistence, and transport. It may depend
   on the JDK and Kotlin only.
 - `infrastructure` holds the adapters: the FIX venue adapter is `orders.infrastructure.fix`.
+- Inside `application` and `domain`, sub-packages are named after a **concept or use
+  case** (`application.venue`, `application.placement`, `domain.order`), never after a
+  technical role. Role names such as `mapper`, `repository`, `controller` are allowed only
+  inside `infrastructure`, and only within a feature slice (`infrastructure.web`,
+  `infrastructure.persistence`). A package that passes about a dozen files splits by
+  sub-feature. A sub-package is created when its chapter starts, never ahead of it: two
+  files stay flat.
 - These are packages, never Gradle subprojects. A new subproject needs a different
   consumer or a different lifecycle, not a different layer.
 - Internal domain events stay inside the module. Integration events, the ones other

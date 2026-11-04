@@ -1,15 +1,15 @@
 package io.github.siloverse.brokerage.orders.infrastructure.fix
 
-import io.github.siloverse.brokerage.orders.application.CancelOrder
+import io.github.siloverse.brokerage.orders.application.venue.CancelOrder
 import io.github.siloverse.brokerage.orders.domain.ClientOrderId
-import io.github.siloverse.brokerage.orders.application.ExecutionReport
+import io.github.siloverse.brokerage.orders.application.venue.ExecutionReport
 import io.github.siloverse.brokerage.orders.domain.Instrument
-import io.github.siloverse.brokerage.orders.application.NewOrder
-import io.github.siloverse.brokerage.orders.application.TopOfBook
-import io.github.siloverse.brokerage.orders.application.Venue
+import io.github.siloverse.brokerage.orders.application.venue.NewOrder
+import io.github.siloverse.brokerage.orders.application.venue.TopOfBook
+import io.github.siloverse.brokerage.orders.application.venue.Venue
 import io.github.siloverse.brokerage.orders.domain.VenueOrderId
-import io.github.siloverse.brokerage.orders.application.VenueOrderView
-import io.github.siloverse.brokerage.orders.application.VenueUnavailableException
+import io.github.siloverse.brokerage.orders.application.venue.VenueOrderView
+import io.github.siloverse.brokerage.orders.application.venue.VenueUnavailableException
 import io.github.siloverse.fix.message.FixMessage
 import io.github.siloverse.fix.order.ExecType
 import io.github.siloverse.fix.order.OrdStatus

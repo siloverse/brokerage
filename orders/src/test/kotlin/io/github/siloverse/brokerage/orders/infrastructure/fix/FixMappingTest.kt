@@ -1,15 +1,15 @@
 package io.github.siloverse.brokerage.orders.infrastructure.fix
 
-import io.github.siloverse.brokerage.orders.application.CancelOrder
+import io.github.siloverse.brokerage.orders.application.venue.CancelOrder
 import io.github.siloverse.brokerage.orders.domain.ClientOrderId
-import io.github.siloverse.brokerage.orders.application.ExecutionReport
+import io.github.siloverse.brokerage.orders.application.venue.ExecutionReport
 import io.github.siloverse.brokerage.orders.domain.Instrument
-import io.github.siloverse.brokerage.orders.application.NewOrder
+import io.github.siloverse.brokerage.orders.application.venue.NewOrder
 import io.github.siloverse.brokerage.orders.domain.Price
 import io.github.siloverse.brokerage.orders.domain.Quantity
 import io.github.siloverse.brokerage.orders.domain.Side
 import io.github.siloverse.brokerage.orders.domain.VenueOrderId
-import io.github.siloverse.brokerage.orders.application.VenueOrderStatus
+import io.github.siloverse.brokerage.orders.application.venue.VenueOrderStatus
 import io.github.siloverse.fix.message.FixField
 import io.github.siloverse.fix.message.FixMessage
 import io.github.siloverse.fix.order.OrderTag

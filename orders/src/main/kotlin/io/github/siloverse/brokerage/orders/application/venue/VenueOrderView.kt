@@ -1,4 +1,4 @@
-package io.github.siloverse.brokerage.orders.application
+package io.github.siloverse.brokerage.orders.application.venue
 
 import io.github.siloverse.brokerage.orders.domain.Quantity
 import io.github.siloverse.brokerage.orders.domain.ClientOrderId
