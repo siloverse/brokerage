@@ -3,6 +3,19 @@ server:
 spring:
   application:
     name: venue
+venue:
+  fix-port: 10402
+  sender-comp-id: VENUE
+  target-comp-id: BROKER
+  heart-bt-int: 30s
+  store-dir: build/venue-fix-store
+  engine:
+    fill-delay: 0s
+    partial-fills: 1
+    start-price: 10000
+    price-step: 5
+    session-close: "17:30"
+    zone: Europe/Berlin
 management:
   endpoints:
     web:

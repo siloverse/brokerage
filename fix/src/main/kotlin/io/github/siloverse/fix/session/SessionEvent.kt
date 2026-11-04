@@ -20,4 +20,7 @@ sealed interface SessionEvent {
 
     /** The peer sent Logout; [text] is its reason if it gave one. */
     data class PeerLoggedOut(val text: String?) : SessionEvent
+
+    /** The application's listener threw while handling [what]. The session carries on; the application must not. */
+    data class ListenerFailed(val what: String, val cause: Throwable) : SessionEvent
 }
