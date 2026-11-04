@@ -273,3 +273,39 @@ slow client, let it resume from a sequence number.
 - 0.6 answered early in section 7: WebSocket subscribers at 100× is the first input that
   breaks a physical limit (one network card); everything else at 100× is a software change
   on the same box. Second is ledger hot-row contention, which arrives before any size limit.
+
+## 2026-11-04 — 0.4b: the load generator and the first latency numbers
+
+- New `loadgen` module (a tool beside the monolith, outside the brokerage package tree like
+  `fix` and `venue`): `Profile` (BASELINE = the interview workload, SKEWED = 90 % on one
+  instrument), `OpenLoopScheduler`, `LatencyRecorder` on HdrHistogram, `Report` as the
+  markdown table for `docs/numbers.md`, `Target` interface with `FixVenueTarget` as the
+  first implementation. Quotes and portfolio reads are reported as "no target yet" until the
+  broker has endpoints; the tool never invents numbers for them.
+- **Open loop, not closed loop.** Requests go out on a fixed timetable whether or not the
+  last one was answered, and latency is measured from the scheduled send time. A closed
+  loop slows down exactly when the system does and hides the queue it causes (coordinated
+  omission). The scheduler test proves it: a target that takes 400 ms still receives 50/s.
+- Outcomes are OK / rejected / timeout / error / skipped, counted separately; only OK shapes
+  the percentiles, so a fast reject can never flatter p99 (numbers.md section 6).
+- Two wrong runs before the right one, both worth keeping:
+  1. Run at 20:24 against the venue app: every submit "OK", every cancel rejected, no fills.
+     The venue's session had closed at 17:30, so it answered each order with Rejected, and
+     the adapter's `submit` treats any first report as a receipt. Fix: the target reads the
+     first report itself (New or Trade = OK, Rejected = rejected) and the fill row counts
+     Expired/Rejected, so a run outside the session is visible in the table.
+  2. After restarting the venue with a late close: every submit timed out. The venue's
+     `FileMessageStore` had kept the sequence numbers from run 1; the generator's fresh
+     in-memory session logged on at 1, which is "sequence too low" to the venue. This is the
+     restart exercise from day 0 happening for real. Fix: `FixVenueConfig.resetOnLogon`
+     (141=Y), right for a throwaway session, wrong for the broker, whose store must carry the
+     numbers across restarts.
+- **First numbers** (baseline 40 orders/s + 8 cancels/s, 60 s, host loopback, no broker in
+  the path): order acknowledgement p50 3.9 ms, p99 12.3 ms, max 33 ms, 2,400/2,400 OK;
+  cancel p99 14.9 ms, 444/444; first fill p99 17 ms, 1,947 filled. PASS against the 100 ms
+  mark with 8× headroom, and this is the floor: everything the broker adds in chapters 1–2
+  (ledger hold, persistence, HTTP) sits on top of ~12 ms.
+- Full build: 129 tests (fix 89, venue 21, loadgen 8, orders 6, app 5).
+
+Chapter 0 left: nothing. 0.6 was answered in numbers.md section 7. Next: chapter 1 ledger,
+which needs the `brokerage` Postgres database in macgrant.

@@ -196,4 +196,7 @@ Append one row each time a measurement replaces an estimate.
 | 2026-11-04 | fsyncs per second, macgrant VM | same as host or worse | ≈ 1,000/s | faster than the physical disk: VirtualBox acknowledges the flush from the host cache; not a durable number |
 | 2026-11-04 | sequential write, macgrant VM | — | ≈ 890 MB/s | same caveat |
 | 2026-11-04 | cores / memory, macgrant VM | — | 2 cores, 5 GB | shared by Postgres, broker, venue, Traefik, Prometheus |
+| 2026-11-04 | order acknowledgement p99, baseline 40/s for 60 s, fake venue over FIX on the host, loopback | ≤ 100 ms target | **12.3 ms** (p50 3.9, max 33) | `loadgen` first run, `docs/loadgen-baseline-2026-11-04.md`; 2,400 of 2,400 acknowledged; no broker in the path yet, so this is the floor the broker's own latency adds to |
+| 2026-11-04 | cancel round trip p99, 8/s | — | 14.9 ms | 444 of 444 honoured |
+| 2026-11-04 | first fill after submit p99 | — | 17.0 ms | 1,947 of 2,400 filled; the rest rested and were cancelled, by design of the profile |
 | 2026-11-04 | FIX message size | — | NOS 150 B, ExecutionReport ≈ 200 B | from the 0.3b codec fixtures |

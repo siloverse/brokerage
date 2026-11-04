@@ -1,6 +1,7 @@
 [versions]
 spring-modulith = "2.1.2"
 archunit = "1.4.1"
+hdrhistogram = "2.2.2"
 
 [libraries]
 spring-modulith-bom = { module = "org.springframework.modulith:spring-modulith-bom", version.ref = "spring-modulith" }
@@ -9,3 +10,4 @@ spring-modulith-starter-test = { module = "org.springframework.modulith:spring-m
 archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test" }
+hdrhistogram = { module = "org.hdrhistogram:HdrHistogram", version.ref = "hdrhistogram" }
