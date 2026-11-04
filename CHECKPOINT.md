@@ -309,3 +309,38 @@ slow client, let it resume from a sequence number.
 
 Chapter 0 left: nothing. 0.6 was answered in numbers.md section 7. Next: chapter 1 ledger,
 which needs the `brokerage` Postgres database in macgrant.
+
+## 2026-11-04 — Chapter 1 opens: the ledger owns its database connection
+
+Awais writes the code from here; this journal records his decisions.
+
+- **Database shape (Awais's decision, stricter than the plan's "schema per module").** One
+  Postgres database `brokerage`; one schema *and one role* per module (`ledger`, `orders`,
+  `engine`, `marketdata`, `portfolio`), each role owning only its schema; plus a reader role
+  `brokerage` with USAGE and SELECT on every schema, including tables the modules' Flyway
+  creates later (default privileges). The wall between modules is therefore in Postgres, not
+  only in the Modulith test: the ledger's connection cannot see the orders schema at all.
+  Proven with psql: ledger creates in `ledger` (ok), in `orders` (permission denied); the
+  reader selects from a table created after provisioning (ok), inserts (permission denied).
+  macgrant change kept as a separate puppet block; the siloverse block was not touched.
+- **What that costs in the app.** Spring Boot auto-configures one datasource; we have one per
+  module, so each module wires its own four beans by hand in `<module>.infrastructure
+  .persistence`: Hikari pool (3 connections, the VM has two cores), `JdbcClient`,
+  `JdbcTransactionManager`, and a Flyway on that pool with `schemas("ledger")` and
+  `locations("classpath:db/migration/ledger")`. Bean names carry the module name because
+  orders will define the same four next chapter. Rule that follows: every `@Transactional`
+  names its manager (`transactionManager = "ledgerTransactionManager"`), or the first call
+  fails the day the second datasource appears. The jdbc auto-configurations are excluded
+  in `application.yml` so nothing is wired by accident in the single-datasource window.
+- **Ledger uses JDBC, not JPA.** Chapter 1 is conditional updates, row locks and isolation
+  levels; the SQL is the lesson and an ORM would hide it.
+- Two surprises worth keeping: (1) `@Configuration class ... may not be final`: Kotlin classes
+  are final and the `jvm-library` convention does not apply the Kotlin Spring plugin (the
+  Spring Boot apps get it from their convention). Business modules with Spring beans add
+  `id("org.jetbrains.kotlin.plugin.spring")`. (2) `*.macgrant-platform.test` stopped resolving
+  on the host: a `vagrant up` started from a background job cannot answer sudo, so the host
+  DNS trigger failed silently; `sudo scripts/configure-host-dns.sh` in a real terminal fixes it.
+- Proof: `:app:bootRun` applied the baseline migration; `\dt ledger.*` as the reader shows
+  `ledger.flyway_schema_history` owned by `ledger`. Build green, 129 tests.
+
+Next: DDIA chapter 7, then 1.0 balance equations written here before any table.

@@ -3,6 +3,12 @@ server:
 spring:
   application:
     name: brokerage
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+      - org.springframework.boot.jdbc.autoconfigure.DataSourceTransactionManagerAutoConfiguration
+      - org.springframework.boot.jdbc.autoconfigure.JdbcTemplateAutoConfiguration
+      - org.springframework.boot.jdbc.autoconfigure.JdbcClientAutoConfiguration
 management:
   endpoints:
     web:
@@ -12,3 +18,10 @@ management:
     metrics:
       export:
         enabled: false
+
+brokerage:
+  ledger:
+    datasource:
+      url: jdbc:postgresql://postgres.macgrant-platform.test:5432/brokerage
+      username: ledger
+      password: ledger
