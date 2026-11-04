@@ -1,9 +1,9 @@
 package io.github.siloverse.venue.fix
 
-import io.github.siloverse.brokerage.orders.Venue
-import io.github.siloverse.brokerage.orders.VenueContract
-import io.github.siloverse.brokerage.orders.venue.fix.FixVenue
-import io.github.siloverse.brokerage.orders.venue.fix.FixVenueConfig
+import io.github.siloverse.brokerage.orders.application.Venue
+import io.github.siloverse.brokerage.orders.application.VenueContract
+import io.github.siloverse.brokerage.orders.infrastructure.fix.FixVenue
+import io.github.siloverse.brokerage.orders.infrastructure.fix.FixVenueConfig
 import io.github.siloverse.fix.session.SessionConfig
 import io.github.siloverse.fix.session.SessionRole
 import io.github.siloverse.fix.store.InMemoryMessageStore

@@ -220,3 +220,27 @@ Same lesson as the conflated feed in the interview (Q3): bound the queue, discon
 slow client, let it resume from a sequence number.
 
 0.3b DONE. Chapter 0 left: 0.4 numbers sheet, 0.4b load generator, 0.6 reflect.
+
+## 2026-11-04 — Module layers: the architecture rule book
+
+- Awais brought a generic modular-monolith rule set (api / application / domain /
+  infrastructure inside each module, contract ownership table, dependency direction,
+  event delivery rules). Reviewed against the repo: already true in shape, different in
+  package layout. Adopted with three adaptations, written down in `docs/architecture.md`:
+  Modulith needs `api` declared as a named interface (one `package-info.java` per module,
+  Java because Kotlin has no package-info); the Venue port moves from the public package to
+  `orders.application` because an outbound port belongs to the consumer's application layer;
+  `fix` (protocol library) and `venue` (second executable, the counterparty) stay outside
+  the monolith by design.
+- Orders is reshaped: `domain` = Price, Quantity, Side, TimeInForce, the four ids,
+  Instrument; `application` = Venue port, NewOrder, CancelOrder, ExecutionReport,
+  VenueOrderView, TopOfBook, VenueUnavailableException (the port's vocabulary);
+  `infrastructure.fix` = FixVenue, FixMapping, FixVenueConfig. `VenueContract` moves with
+  the port. The other four modules get their empty `api` named interface now, so chapter 1
+  builds ledger in this shape from day one.
+- `LayersTest` (ArchUnit, in `app`) guards the inside of a module: domain imports no other
+  layer and no framework; application never imports infrastructure; api depends only on
+  api, the JDK and Kotlin. `ModularityTest` keeps guarding the walls between modules; its
+  map now shows `NamedInterface: name=api` on all five. 121 tests green.
+- Rule worth remembering: an `api` DTO is self-contained. Modulith would reject
+  `ledger.domain.Money` in another module anyway, so `api` types cannot lean on `domain`.
