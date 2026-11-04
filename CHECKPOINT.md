@@ -254,3 +254,22 @@ slow client, let it resume from a sequence number.
   moved to `orders.application.venue`, leaving room for `placement` and `reconciliation`.
   Worth borrowing in chapter 2: a command → executor state machine with a per-state table of
   allowed commands, with the table kept in one tested domain file.
+
+## 2026-11-04 — 0.4: the numbers sheet
+
+- `docs/numbers.md` filled from the interview inputs plus five own guesses (250 trading days,
+  6.5 h session, 1.2 fills per order, 10 book events/s per instrument in drill mode, 7-day
+  FIX log retention). Headlines: 48 commands/s and ≈ 100 FIX reports/s at peak against
+  300 HTTP reads/s (1 : 6 writes to reads); ≈ 30 GB/year of which 20 GB in Postgres; the
+  conflated feed is 20,000 updates/s ≈ 3 MB/s and does not change between 10 and 1,000
+  instruments, because bandwidth scales with subscribers × subscriptions; the wire is never
+  the first bottleneck, the slow consumer is.
+- Measured the machine. Host NVMe: ≈ 320 fsyncs/s, 830 MB/s sequential. macgrant VM:
+  ≈ 1,000 fsyncs/s, which is faster than the disk under it: VirtualBox acknowledges the
+  flush from the host page cache. The honest durable-order ceiling is the host's 320/s
+  (8× the 40/s peak); group commit is the way past it, and the three log strategies in
+  chapter 3 differ mostly in who batches. The VM has 2 cores and 5 GB shared by everything,
+  so CPU will saturate before disk in the load test.
+- 0.6 answered early in section 7: WebSocket subscribers at 100× is the first input that
+  breaks a physical limit (one network card); everything else at 100× is a software change
+  on the same box. Second is ledger hot-row contention, which arrives before any size limit.
