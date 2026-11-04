@@ -53,5 +53,6 @@ include(
     ":engine",
     ":app",
     ":venue",
-    ":fix"
+    ":fix",
+    ":loadgen"
 )

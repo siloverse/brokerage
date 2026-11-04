@@ -14,4 +14,10 @@ data class FixVenueConfig(
     val replyTimeout: Duration = Duration.ofSeconds(5),
     /** How long a call waits for the session to be logged on before failing. */
     val connectTimeout: Duration = Duration.ofSeconds(10),
+    /**
+     * Send ResetSeqNumFlag (141=Y) on Logon so both sides start at 1. Right for a throwaway
+     * session such as the load generator; wrong for the broker, whose store must carry the
+     * sequence numbers across restarts so nothing is lost or replayed.
+     */
+    val resetOnLogon: Boolean = false,
 )

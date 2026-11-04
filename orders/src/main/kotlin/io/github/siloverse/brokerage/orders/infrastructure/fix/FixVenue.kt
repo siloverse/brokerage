@@ -62,7 +62,7 @@ class FixVenue(
     val events = MutableSharedFlow<SessionEvent>(replay = 64, extraBufferCapacity = 256)
 
     private val initiator = FixInitiator(
-        SessionConfig(config.senderCompId, config.targetCompId, SessionRole.INITIATOR, config.heartBtInt),
+        SessionConfig(config.senderCompId, config.targetCompId, SessionRole.INITIATOR, config.heartBtInt, resetOnLogon = config.resetOnLogon),
         store,
         object : SessionListener {
             override fun onMessage(message: FixMessage) = onInbound(message)
