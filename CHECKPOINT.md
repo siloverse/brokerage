@@ -344,3 +344,127 @@ Awais writes the code from here; this journal records his decisions.
   `ledger.flyway_schema_history` owned by `ledger`. Build green, 129 tests.
 
 Next: DDIA chapter 7, then 1.0 balance equations written here before any table.
+
+## 2026-11-19 — 1.0 Balance equations and per-asset rules
+
+Written before any table, as the plan demands. The tables in 1.1 must obey every line here.
+
+### 1. The three equations
+
+For one account:
+
+- `booked = sum of its ledger entries`. What the account truly holds.
+- `reserved = sum of its open holds`. What is set aside for orders that are still alive.
+- `available = booked − reserved`. What the owner can still use.
+
+Stored or computed:
+
+| Value | Truth lives in | Also stored on the account row? | Why |
+|---|---|---|---|
+| booked | the entries, append-only | yes, as a cached column | summing every entry on every order is too slow; the cache is updated in the same transaction that writes the entries |
+| reserved | the open holds | yes, as a cached column | same reason, and it gives every hold one row to lock (see the danger below) |
+| available | nothing of its own | yes, as a column with `CHECK (available >= 0)` | the database itself then refuses an overdraft, whatever the code does |
+
+The entries and the holds are the truth. The three columns are a copy kept for speed and for
+the lock. A nightly check (1.4, chapter 9) recomputes them from the truth and must find no
+difference. Rule: the cached columns change only in the same transaction as the entry or hold
+that causes the change.
+
+### 2. What a hold is
+
+A hold is a reservation against one account for one order. It moves nothing and writes no
+entry. It only raises `reserved`, so `available` drops and the same money cannot be promised
+twice.
+
+- **Buy order:** hold cash = limit price × quantity + the largest fee that could apply.
+- **Sell order:** hold the shares, on the position account.
+
+How a hold ends:
+
+| Event | What happens to the hold | Entries written? |
+|---|---|---|
+| fill (whole or part) | consumed by the filled amount | yes: money and shares really move |
+| cancel | the rest is released | no |
+| expiry at session close | the rest is released | no |
+| reject by the venue | all of it is released | no |
+
+Only the venue's word ends a hold: a Canceled, Expired or Rejected report, or a fill. The
+broker never releases on its own guess (guarantee 6 of the Venue port).
+
+A hold has an amount and a consumed amount. `open part = amount − consumed`. `reserved` is
+the sum of the open parts.
+
+**Price improvement.** The hold was sized for the limit price. If the fill is cheaper, the
+fill consumes only what it really cost, and when the order is fully filled the leftover open
+part is released, with no entry. The money was never moved, so there is nothing to move back.
+
+### 3. Two kinds of asset, balanced separately
+
+- **Cash:** an amount in minor units (cents) of one currency. Long, never a float.
+- **Position:** a number of whole shares of one instrument. Long.
+
+An account holds exactly one asset: Alice has one EUR account and one account per instrument
+she owns. Euros and shares are different things and are never added together.
+
+**Balanced** means: inside one transfer, the entries for each asset sum to zero on their own.
+A fill touches two assets, so it must balance twice:
+
+| Entry | Asset | Amount |
+|---|---|---|
+| Alice cash → venue settlement cash | EUR | −5000 / +5000 |
+| Alice cash → fee income | EUR | −100 / +100 |
+| venue position → Alice position | ACME | −10 / +10 |
+
+EUR sums to zero. ACME sums to zero. A transfer where either sum is not zero is refused.
+
+### 4. Account types
+
+| Type | What it is for |
+|---|---|
+| user | a customer's cash or position; the only type with holds, and the only type that may never go below zero |
+| fee income | where the broker's fees land; the house's earnings |
+| venue settlement | the other side of every trade and of every deposit and withdrawal; stands for the outside world, so it may be negative |
+| suspense | a parking place for money or shares we cannot explain yet (a report for an unknown order, a mismatch found by reconciliation); it should be empty, and anything in it is a task for a human |
+
+### 5. Decision: one ledger with an asset column
+
+One `account` table and one `ledger_entry` table, each row carrying its asset (kind + code:
+`CASH/EUR`, `POSITION/ACME`). Not two separate ledgers.
+
+Why: a fill is one business fact that touches both cash and shares. With one ledger it is one
+transfer, written in one transaction, balanced per asset by one rule. With two ledgers the
+same fill would be two transfers that must be kept together by extra code, and that seam is
+exactly where money and shares could drift apart. Holds, idempotency keys, the audit trail
+and the nightly check are also written once instead of twice.
+
+What we give up: the database cannot enforce "cents here, shares there" by table shape, so
+the per-asset rule lives in code and in the nightly check; amounts of different meaning share
+one column, so every query must filter or group by asset; and a mistake that sums across
+assets is possible to write. The guard is the rule in part 3 and a test for it.
+
+### The danger, and what stops it
+
+Two buy orders from Alice arrive at the same moment. Each needs 51 EUR; she has 100
+available. If both read `available`, both see 100, both pass, both insert a hold: 102
+promised out of 100. In DDIA chapter 8 (2nd edition) terms this is **write skew**: each
+transaction reads, decides, and writes a *different* row (its own hold), so neither blocks
+the other under read committed or snapshot isolation.
+
+What stops it: both holds must change the **same row**. Each hold does one conditional update
+on the account row, `UPDATE account SET reserved = reserved + :x WHERE id = :id AND
+booked − reserved >= :x`, and inserts the hold only if one row was updated. The second
+transaction waits on the row lock, then re-checks the condition against the committed value
+and fails. That is the book's "materialize the conflict", and it is why `reserved` is a
+column and not only a sum. The `CHECK (available >= 0)` is the second net under it.
+Task 1.5 proves each step with two psql sessions.
+
+### Invariants the tables must keep
+
+1. Entries are never updated or deleted.
+2. Every transfer's entries sum to zero per asset.
+3. `account.booked` equals the sum of its entries; `account.reserved` equals the sum of the
+   open parts of its holds; `available = booked − reserved`.
+4. A user account's `available` is never negative.
+5. A hold changes only through fill, cancel, expiry or reject, each exactly once per venue
+   report (the report's ExecutionId is the idempotency key).
+6. The same idempotency key never creates a second transfer.
