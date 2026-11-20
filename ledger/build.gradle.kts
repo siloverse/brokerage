@@ -6,6 +6,8 @@ plugins {
 dependencies {
     implementation(platform(local.spring.modulith.bom))
     implementation(local.spring.modulith.starter.core)
+    implementation(platform(local.siloverse.identifiers.bom))
+    implementation(local.siloverse.identifiers.core)
     implementation(local.spring.boot.starter.jdbc)
     implementation(local.flyway.core)
     runtimeOnly(local.flyway.postgresql)

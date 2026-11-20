@@ -2,6 +2,7 @@
 spring-modulith = "2.1.2"
 archunit = "1.4.1"
 hdrhistogram = "2.2.2"
+siloverse-identifiers = "0.1.0"
 
 [libraries]
 spring-modulith-bom = { module = "org.springframework.modulith:spring-modulith-bom", version.ref = "spring-modulith" }
@@ -15,3 +16,5 @@ spring-boot-starter-jdbc = { module = "org.springframework.boot:spring-boot-star
 flyway-core = { module = "org.flywaydb:flyway-core" }
 flyway-postgresql = { module = "org.flywaydb:flyway-database-postgresql" }
 postgresql = { module = "org.postgresql:postgresql" }
+siloverse-identifiers-bom = { module = "io.github.siloverse:identifiers-bom", version.ref = "siloverse-identifiers" }
+siloverse-identifiers-core = { module = "io.github.siloverse:identifiers-core" }
