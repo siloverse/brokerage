@@ -391,8 +391,9 @@ How a hold ends:
 Only the venue's word ends a hold: a Canceled, Expired or Rejected report, or a fill. The
 broker never releases on its own guess (guarantee 6 of the Venue port).
 
-A hold has an amount and a consumed amount. `open part = amount − consumed`. `reserved` is
-the sum of the open parts.
+A hold has an amount, a consumed amount and a released amount.
+`open part = amount − consumed − released`; the hold is closed when that is zero.
+`reserved` is the sum of the open parts.
 
 **Price improvement.** The hold was sized for the limit price. If the fill is cheaper, the
 fill consumes only what it really cost, and when the order is fully filled the leftover open
@@ -466,5 +467,64 @@ Task 1.5 proves each step with two psql sessions.
    open parts of its holds; `available = booked − reserved`.
 4. A user account's `available` is never negative.
 5. A hold changes only through fill, cancel, expiry or reject, each exactly once per venue
-   report (the report's ExecutionId is the idempotency key).
+   report (the key is the UUID the orders module gave that execution when it first stored
+   it; see the 1.1 entry).
 6. The same idempotency key never creates a second transfer.
+
+## 2026-11-20 — 1.1 The ledger tables
+
+Awais wrote the migration by hand, one table at a time, and cut my first sketch down with
+one rule: only what this chapter uses goes in; correctness constraints always stay; anything
+speculative is named and left out. `V1__ledger_tables.sql`, four tables, 26 constraints.
+
+- **accounts**: `id` bigint identity (internal, for foreign keys) plus `uuid` (public).
+  `user_uuid` null for house accounts, tied to `type` by a check. `asset_type` + `asset_code`
+  are the asset; for cash the code is the currency. `booked`, `reserved` cached;
+  `available` is a generated column, so it cannot drift. The overdraft rule is one check:
+  not a user account, or `booked − reserved >= 0`. One account per user per asset, with
+  `NULLS NOT DISTINCT` so the house also gets exactly one per role and asset.
+- **holds**: `reference` is the caller's UUID for what the reservation is for (today an
+  order). Not a foreign key, and unique, so it is also the idempotency key for placing the
+  hold. `amount`, `consumed`, `released`; no state column, the numbers say whether it is open.
+- **transfers**: the header of one business fact. `kind` + `idempotency_key` unique. No
+  amount, account or currency: a fill touches two assets and five accounts, so those live in
+  the entries. Immutable.
+- **ledger_entries**: transfer, account, signed amount. Bigint id only; nobody outside ever
+  names an entry. Append-only. The truth behind `accounts.booked`.
+
+Decisions made on the way, each one Awais's question:
+
+- **Ids.** UUID (version 7, made in Kotlin; Postgres 16 has no `uuidv7()`) for what other
+  modules see; bigint identity for internal keys. `GENERATED ALWAYS AS IDENTITY`, never
+  `bigserial`: it refuses a hand-supplied id.
+- **Idempotency key is always a UUID.** The venue's execution id is foreign text and only
+  unique per venue. The orders module stores it at the gate (unique on venue + execution id),
+  gives the row a UUID in the same insert, and passes only that on. A duplicate report dies
+  at the gate; a duplicate event dies on `transfers_key_once`. The ledger never sees an
+  outside identifier. Rule: uuid when we make the value, text when someone else does, and
+  the gate turns the second into the first.
+- **No optimistic locking.** Balances change by atomic statements
+  (`SET booked = booked + :x`, with a `WHERE` condition for holds). A second transaction
+  waits on the row lock and applies to the fresh value under read committed. No `version`.
+- **Deposits take no hold.** A hold protects value that is about to leave an account that can
+  run out. The settlement account cannot run out, and a hold on it would make one row the
+  queue for the whole system.
+- **Hold is a direct call, fill is an event.** Orders needs the answer before it sends the
+  order; a fill is a fact nobody waits for. An adapter in `app` turns the event into the
+  ledger's command, so the ledger imports nothing from orders.
+
+Mentioned, not added: `state`, `updated_at` and a `transfer_events` table on transfers (when
+a transfer can wait, fail or be reversed); a `reason` beside `holds.reference` (when a
+withdrawal places a hold); the asset copied onto entries; scoping the key per user; and
+every performance index (first two will be `ledger_entries(account_id)` and
+`(transfer_id)`, after `EXPLAIN` shows the scan).
+
+Proof: fifteen attempts to break a rule, run as the `ledger` role in a rolled-back
+transaction, each refused by the constraint named for it (two were allowed on purpose: a
+negative settlement balance, and the same key under a different kind).
+
+One-time exception: `V1__ledger_tables.sql` replaces the empty `V1_0` baseline that was
+already on main, because the only database that ever ran it was the dev VM. From here every
+schema change is a new file.
+
+Next: 1.2, deposits and withdrawals with an `Idempotency-Key`.
