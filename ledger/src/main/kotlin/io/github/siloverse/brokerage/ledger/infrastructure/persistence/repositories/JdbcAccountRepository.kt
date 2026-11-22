@@ -1,8 +1,9 @@
 package io.github.siloverse.brokerage.ledger.infrastructure.persistence.repositories
 
-import io.github.siloverse.brokerage.ledger.domain.account.model.AccountType
-import io.github.siloverse.brokerage.ledger.domain.account.model.AssetType
-import io.github.siloverse.brokerage.ledger.domain.account.model.Currency
+import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AccountType
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
 import io.github.siloverse.identifiers.core.UuidV7
 import org.springframework.beans.factory.annotation.Qualifier
@@ -17,17 +18,17 @@ class JdbcAccountRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClien
         userUuid: UUID,
         assetType: AssetType,
         currency: Currency
-    ): Long {
-        val accountId = insertAccount(
+    ): AccountIdentifier {
+        val accountIdentifier = insertAccount(
             accountType = AccountType.USER,
             assetType = assetType,
             assetCode = currency.name,
             userUuid = userUuid
         )
-        if (accountId != null) {
-            return accountId
+        if (accountIdentifier != null) {
+            return accountIdentifier
         }
-        return getAccountId(
+        return getAccountIdentifier(
             accountType = AccountType.USER,
             assetType = assetType,
             assetCode = currency.name,
@@ -38,16 +39,16 @@ class JdbcAccountRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClien
     override fun ensureSettlementAccount(
         assetType: AssetType,
         currency: Currency
-    ): Long {
-        val accountId = insertAccount(
+    ): AccountIdentifier {
+        val accountIdentifier = insertAccount(
             accountType = AccountType.VENUE_SETTLEMENT,
             assetType = assetType,
             assetCode = currency.name,
         )
-        if (accountId != null) {
-            return accountId
+        if (accountIdentifier != null) {
+            return accountIdentifier
         }
-        return getAccountId(
+        return getAccountIdentifier(
             accountType = AccountType.VENUE_SETTLEMENT,
             assetType = assetType,
             assetCode = currency.name,
@@ -67,18 +68,32 @@ class JdbcAccountRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClien
             .update()
     }
 
+    override fun takeFromAvailable(accountId: Long, amount: Long): Int {
+        return jdbc.sql(
+            """
+                update accounts
+                set booked = booked - :amount, updated_at = now()
+                where id = :id 
+                and available >= :amount
+            """.trimIndent()
+        )
+            .param("id", accountId)
+            .param("amount", amount)
+            .update()
+    }
+
     private fun insertAccount(
         accountType: AccountType,
         assetType: AssetType,
         assetCode: String,
         userUuid: UUID? = null,
-    ): Long? {
+    ): AccountIdentifier? {
         return jdbc.sql(
             """
                 insert into accounts (uuid, user_uuid, type, asset_type, asset_code)
                 values (:uuid, :user_uuid, :type, :asset_type, :asset_code)
                 on conflict on constraint accounts_one_per_asset do nothing
-                returning id
+                returning id,uuid
             """.trimIndent()
         )
             .param("uuid", UuidV7.next())
@@ -86,20 +101,20 @@ class JdbcAccountRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClien
             .param("type", accountType.name)
             .param("asset_type", assetType.name)
             .param("asset_code", assetCode)
-            .query(Long::class.java)
+            .query(AccountIdentifier::class.java)
             .optional()
             .orElse(null)
     }
 
-    private fun getAccountId(
+    private fun getAccountIdentifier(
         accountType: AccountType,
         assetType: AssetType,
         assetCode: String,
         userUuid: UUID? = null,
-    ): Long {
+    ): AccountIdentifier {
         return jdbc.sql(
             """
-                select id 
+                select id, uuid 
                 from accounts
                 where user_uuid is not distinct from :user_uuid 
                 AND type=:type
@@ -111,7 +126,7 @@ class JdbcAccountRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClien
             .param("type", accountType.name)
             .param("asset_type", assetType.name)
             .param("asset_code", assetCode)
-            .query(Long::class.java)
+            .query(AccountIdentifier::class.java)
             .single()
     }
 }

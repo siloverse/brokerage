@@ -2,7 +2,7 @@ package io.github.siloverse.brokerage.ledger.application.deposit.services
 
 import io.github.siloverse.brokerage.ledger.application.deposit.model.Deposit
 import io.github.siloverse.brokerage.ledger.application.deposit.model.DepositReceipt
-import io.github.siloverse.brokerage.ledger.domain.account.model.AssetType
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.LedgerEntryRepository
@@ -36,30 +36,30 @@ class DepositFundsService(
             )
         }
 
-        val userAccountId = accountRepository.ensureUserAccount(
+        val userAccountIdentifier = accountRepository.ensureUserAccount(
             userUuid = deposit.userUuid,
             assetType = AssetType.CASH,
             currency = deposit.currency
         )
 
-        val settlementAccountId = accountRepository.ensureSettlementAccount(
+        val settlementAccountIdentifier = accountRepository.ensureSettlementAccount(
             assetType = AssetType.CASH,
             currency = deposit.currency
         )
 
         ledgerEntryRepository.insert(
             transferId,
-            userAccountId,
+            userAccountIdentifier.id,
             deposit.amount
         )
 
         ledgerEntryRepository.insert(
             transferId,
-            settlementAccountId,
+            settlementAccountIdentifier.id,
             -deposit.amount
         )
 
-        updateAccountsForDeposit(userAccountId, settlementAccountId, deposit)
+        updateAccountsForDeposit(userAccountIdentifier.id, settlementAccountIdentifier.id, deposit)
 
         return DepositReceipt(
             transferUuid = transferUuid,
