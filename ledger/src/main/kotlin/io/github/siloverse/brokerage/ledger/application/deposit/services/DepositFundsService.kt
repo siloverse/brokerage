@@ -59,19 +59,26 @@ class DepositFundsService(
             -deposit.amount
         )
 
-        accountRepository.addToBooked(
-            userAccountId,
-            deposit.amount
-        )
-        accountRepository.addToBooked(
-            settlementAccountId,
-            -deposit.amount
-        )
-
+        updateAccountsForDeposit(userAccountId, settlementAccountId, deposit)
 
         return DepositReceipt(
             transferUuid = transferUuid,
             replayed = false
         )
+    }
+
+    private fun updateAccountsForDeposit(
+        userAccountId: Long,
+        settlementAccountId: Long,
+        deposit: Deposit,
+    ) {
+        listOf(
+            userAccountId to deposit.amount,
+            settlementAccountId to -deposit.amount
+        )
+            .sortedBy { (accountId, _) -> accountId }
+            .forEach { (accountId, amount) ->
+                accountRepository.addToBooked(accountId, amount)
+            }
     }
 }
