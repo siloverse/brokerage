@@ -1,8 +1,7 @@
-package io.github.siloverse.brokerage.ledger.infrastructure.persistence
+package io.github.siloverse.brokerage.ledger.infrastructure.persistence.config
 
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import io.github.siloverse.brokerage.ledger.infrastructure.persistence.settings.LedgerDataSourceProperties
 import org.flywaydb.core.Flyway
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.context.properties.EnableConfigurationProperties

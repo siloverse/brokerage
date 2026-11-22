@@ -12,6 +12,14 @@ dependencies {
     implementation(local.flyway.core)
     runtimeOnly(local.flyway.postgresql)
     runtimeOnly(local.postgresql)
+    implementation(libs.bundles.spring.web)
+    implementation(kotlin("reflect"))
+
+    testImplementation(local.spring.boot.starter.test)
+    testImplementation(local.mockito.kotlin)
+    testImplementation(local.spring.boot.webmvc.test)
+    testImplementation(local.spring.boot.testcontainers)
+    testImplementation(libs.testcontainers.postgresql)
 }
 // package-info.java only marks the api named interface; nothing for javadoc to render.
 tasks.javadoc { exclude("**/package-info.java") }

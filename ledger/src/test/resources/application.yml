@@ -1,0 +1,6 @@
+brokerage:
+  ledger:
+    datasource:
+      url: jdbc:tc:postgresql:16:///brokerage
+      username: test
+      password: test

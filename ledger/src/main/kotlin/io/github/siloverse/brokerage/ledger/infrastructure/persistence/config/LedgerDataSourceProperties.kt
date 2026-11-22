@@ -1,4 +1,4 @@
-package io.github.siloverse.brokerage.ledger.infrastructure.persistence.settings
+package io.github.siloverse.brokerage.ledger.infrastructure.persistence.config
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 
