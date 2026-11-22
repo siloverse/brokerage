@@ -1,6 +1,6 @@
 package io.github.siloverse.brokerage.ledger.application.deposit.model
 
-import io.github.siloverse.brokerage.ledger.domain.account.model.Currency
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows

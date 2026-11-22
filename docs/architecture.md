@@ -50,8 +50,9 @@ When a chapter needs an exception, write it down here first.
 - Inside `application` and `domain`, sub-packages are named after a **concept or use
   case** (`application.deposit`, `domain.account`) first. Feature first, role second:
   **inside** each of those, files are grouped by role from the first file on, with the same
-  folder names everywhere: `model` (types, enums, commands, results), `services` (use case
-  services), `repositories` (repository interfaces in `domain`, their implementations in
+  folder names everywhere: `model` (types, commands, results; enums in `model/enums`),
+  `services` (use case services), `exception` (the refusals a use case can throw),
+  `repositories` (repository interfaces in `domain`, their implementations in
   `infrastructure.persistence`), `config`. A role package never sits above a feature:
   no `application.services`, no `domain.repositories`. Role names such as `mapper`, `repository`, `controller` are allowed only
   inside `infrastructure`, and only within a feature slice (`infrastructure.web`,

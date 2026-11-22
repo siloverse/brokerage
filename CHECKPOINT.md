@@ -566,3 +566,45 @@ database mid-transfer (needs the container object, so the bean style of Testcont
 Not yet done: the curl run against the VM database, which also applies V2 there.
 
 Next: withdrawals, where `accounts_no_overdraft` must become a clean refusal.
+
+## 2026-11-22 — 1.2 Withdrawals (second half)
+
+A withdrawal is a deposit with the signs reversed (−user, +settlement) and one new rule: it
+can be refused.
+
+- **The refusal is in the update.** `takeFromAvailable` runs
+  `update accounts set booked = booked - :amount where id = :id and available >= :amount`.
+  One row changed means the money was there and is taken; zero rows means not enough.
+  Checking and taking are one statement, so two withdrawals cannot both pass the check. The
+  service throws `InsufficientFundsException`, the transaction rolls back, the controller
+  answers 409. The `accounts_no_overdraft` constraint stays behind it as the safety net.
+- **Two gates, two jobs.** The unique idempotency key stops the *same* request booking
+  twice. It does nothing for two *different* withdrawals from one account: those meet at the
+  account row. The second waits for the row lock, and under read committed PostgreSQL
+  re-checks the `where` against the committed row before it decides.
+- **Lock order.** Every transaction updates account rows in ascending `accounts.id`, in the
+  deposit and the withdrawal alike. Two transactions then meet at the lowest shared row and
+  the waiting one holds nothing the other needs, so no deadlock can form.
+- **`AccountIdentifier`** (id + uuid) is what the repository hands back for an account, so
+  the refusal can name the account without a second query.
+- **A refused key is forgotten** (Awais's decision). The rollback removes the transfer row,
+  so the same key sent again is judged fresh and can succeed once the money is there.
+  Remembering a refusal needs a state on the transfer and a committed refusal; that returns
+  when transfers get a state.
+- **A negative amount** is refused by the command itself, as for a deposit. Without that
+  rule a withdrawal of −50 would have been a free deposit.
+
+`POST /api/ledger/withdrawals`: 201 new, 200 replayed, 400 invalid, 409 insufficient funds.
+
+Tests: ten withdrawals of 30 from a balance of 100 at the same moment give exactly three 201
+and seven 409, balance 10. Ten deposits and ten withdrawals for one user at the same moment
+all succeed with no deadlock. A refused withdrawal leaves no transfer, no entry, and for a
+new user no account.
+
+Mentioned, not added: retry on `deadlock detected` (40P01); one repository method that takes
+all balance changes and sorts them itself, so the order cannot be forgotten; a limit on the
+settlement account (it must never go above zero, which the user-side rule already ensures).
+
+Not yet done: the two-window run by hand and the curl run against the VM database.
+
+Next: 1.3, holds.

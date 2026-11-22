@@ -1,4 +1,4 @@
-package io.github.siloverse.brokerage.ledger.domain.account.model
+package io.github.siloverse.brokerage.ledger.domain.account.model.enums
 
 enum class AccountType {
     USER,

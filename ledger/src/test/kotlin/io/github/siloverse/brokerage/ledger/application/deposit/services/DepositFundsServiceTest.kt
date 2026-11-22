@@ -2,8 +2,9 @@ package io.github.siloverse.brokerage.ledger.application.deposit.services
 
 import io.github.siloverse.brokerage.ledger.BaseUnitTest
 import io.github.siloverse.brokerage.ledger.application.deposit.model.Deposit
-import io.github.siloverse.brokerage.ledger.domain.account.model.AssetType
-import io.github.siloverse.brokerage.ledger.domain.account.model.Currency
+import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.LedgerEntryRepository
@@ -48,8 +49,8 @@ class DepositFundsServiceTest : BaseUnitTest() {
 
     private fun aNewKey() {
         whenever(transferRepository.insert(any(), eq(TransferKind.DEPOSIT), eq(key))).thenReturn(transferId)
-        whenever(accountRepository.ensureUserAccount(user, AssetType.CASH, Currency.EUR)).thenReturn(userAccountId)
-        whenever(accountRepository.ensureSettlementAccount(AssetType.CASH, Currency.EUR)).thenReturn(settlementAccountId)
+        whenever(accountRepository.ensureUserAccount(user, AssetType.CASH, Currency.EUR)).thenReturn(AccountIdentifier(userAccountId, UUID.randomUUID()))
+        whenever(accountRepository.ensureSettlementAccount(AssetType.CASH, Currency.EUR)).thenReturn(AccountIdentifier(settlementAccountId, UUID.randomUUID()))
     }
 
     @Test
