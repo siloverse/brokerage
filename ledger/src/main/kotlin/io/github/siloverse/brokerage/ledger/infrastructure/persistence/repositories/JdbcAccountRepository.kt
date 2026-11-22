@@ -129,4 +129,18 @@ class JdbcAccountRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClien
             .query(AccountIdentifier::class.java)
             .single()
     }
+
+    override fun reserve(accountId: Long, amount: Long): Int {
+        return jdbc.sql(
+            """
+                update accounts
+                set reserved = reserved + :amount, updated_at = now()
+                where id = :id 
+                and available >= :amount
+            """.trimIndent()
+        )
+            .param("id", accountId)
+            .param("amount", amount)
+            .update()
+    }
 }

@@ -10,4 +10,5 @@ interface AccountRepository {
     fun ensureSettlementAccount(assetType: AssetType, currency: Currency): AccountIdentifier
     fun addToBooked(accountId: Long, amount: Long)
     fun takeFromAvailable(accountId: Long, amount: Long): Int
+    fun reserve(accountId: Long, amount: Long): Int
 }

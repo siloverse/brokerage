@@ -13,21 +13,21 @@ class DepositTest {
 
     @Test
     fun `a deposit with a positive amount is valid`() {
-        val deposit = Deposit(key, user, Currency.EUR, 10_000)
+        val depositCommand = DepositCommand(key, user, Currency.EUR, 10_000)
 
-        assertEquals(10_000, deposit.amount)
-        assertEquals(Currency.EUR, deposit.currency)
+        assertEquals(10_000, depositCommand.amount)
+        assertEquals(Currency.EUR, depositCommand.currency)
     }
 
     @Test
     fun `an amount of zero is refused`() {
-        val error = assertThrows<IllegalArgumentException> { Deposit(key, user, Currency.EUR, 0) }
+        val error = assertThrows<IllegalArgumentException> { DepositCommand(key, user, Currency.EUR, 0) }
 
         assertEquals("amount must be positive", error.message)
     }
 
     @Test
     fun `a negative amount is refused`() {
-        assertThrows<IllegalArgumentException> { Deposit(key, user, Currency.EUR, -1) }
+        assertThrows<IllegalArgumentException> { DepositCommand(key, user, Currency.EUR, -1) }
     }
 }
