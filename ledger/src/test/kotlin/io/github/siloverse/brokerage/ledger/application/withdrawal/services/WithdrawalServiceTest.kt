@@ -1,8 +1,8 @@
 package io.github.siloverse.brokerage.ledger.application.withdrawal.services
 
 import io.github.siloverse.brokerage.ledger.BaseUnitTest
-import io.github.siloverse.brokerage.ledger.application.withdrawal.exception.InsufficientFundsException
-import io.github.siloverse.brokerage.ledger.application.withdrawal.model.Withdrawal
+import io.github.siloverse.brokerage.ledger.application.withdrawal.model.WithdrawalCommand
+import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
@@ -44,7 +44,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
 
     private val user = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val key = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-    private val withdrawal = Withdrawal(key, user, 5_000, Currency.EUR)
+    private val withdrawalCommand = WithdrawalCommand(key, user, 5_000, Currency.EUR)
 
     private val transferId = 1L
     private val userAccountUuid = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc")
@@ -62,7 +62,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey()
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(1)
 
-        service.withdraw(withdrawal)
+        service.withdraw(withdrawalCommand)
 
         verify(ledgerEntryRepository).insert(transferId, 10L, -5_000)
         verify(ledgerEntryRepository).insert(transferId, 20L, 5_000)
@@ -76,7 +76,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey()
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(1)
 
-        val receipt = service.withdraw(withdrawal)
+        val receipt = service.withdraw(withdrawalCommand)
 
         val writtenUuid = argumentCaptor<UUID>()
         verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.WITHDRAWAL), eq(key))
@@ -89,7 +89,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey()
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(0)
 
-        val error = assertThrows<InsufficientFundsException> { service.withdraw(withdrawal) }
+        val error = assertThrows<InsufficientFundsException> { service.withdraw(withdrawalCommand) }
 
         assertTrue(error.message!!.contains(user.toString()))
         assertTrue(error.message!!.contains(userAccountUuid.toString()))
@@ -101,7 +101,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey()
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(1)
 
-        service.withdraw(withdrawal)
+        service.withdraw(withdrawalCommand)
 
         verify(accountRepository, never()).addToBooked(eq(10L), any())
     }
@@ -111,7 +111,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey(userAccountId = 10L, settlementAccountId = 20L)
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(1)
 
-        service.withdraw(withdrawal)
+        service.withdraw(withdrawalCommand)
 
         val order = inOrder(accountRepository)
         order.verify(accountRepository).takeFromAvailable(10L, 5_000)
@@ -123,7 +123,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey(userAccountId = 10L, settlementAccountId = 5L)
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(1)
 
-        service.withdraw(withdrawal)
+        service.withdraw(withdrawalCommand)
 
         val order = inOrder(accountRepository)
         order.verify(accountRepository).addToBooked(5L, 5_000)
@@ -136,7 +136,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         whenever(transferRepository.insert(any(), eq(TransferKind.WITHDRAWAL), eq(key))).thenReturn(null)
         whenever(transferRepository.findUuidByKey(key)).thenReturn(firstTransferUuid)
 
-        val receipt = service.withdraw(withdrawal)
+        val receipt = service.withdraw(withdrawalCommand)
 
         assertTrue(receipt.replayed)
         assertEquals(firstTransferUuid, receipt.transferUuid)

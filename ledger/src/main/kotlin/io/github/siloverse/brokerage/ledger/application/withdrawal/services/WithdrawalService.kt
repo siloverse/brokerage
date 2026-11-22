@@ -1,8 +1,8 @@
 package io.github.siloverse.brokerage.ledger.application.withdrawal.services
 
-import io.github.siloverse.brokerage.ledger.application.withdrawal.exception.InsufficientFundsException
-import io.github.siloverse.brokerage.ledger.application.withdrawal.model.Withdrawal
+import io.github.siloverse.brokerage.ledger.application.withdrawal.model.WithdrawalCommand
 import io.github.siloverse.brokerage.ledger.application.withdrawal.model.WithdrawalReceipt
+import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
@@ -21,17 +21,17 @@ class WithdrawalService(
 ) {
 
     @Transactional(transactionManager = "ledgerTransactionManager")
-    fun withdraw(withdrawal: Withdrawal): WithdrawalReceipt {
+    fun withdraw(withdrawalCommand: WithdrawalCommand): WithdrawalReceipt {
 
         val transferUuid = UuidV7.next()
         val transferId = transferRepository.insert(
             uuid = transferUuid,
             kind = TransferKind.WITHDRAWAL,
-            idempotencyKey = withdrawal.idempotencyKey
+            idempotencyKey = withdrawalCommand.idempotencyKey
         )
 
         if (transferId == null) {
-            val existingTransferUuid = transferRepository.findUuidByKey(withdrawal.idempotencyKey)
+            val existingTransferUuid = transferRepository.findUuidByKey(withdrawalCommand.idempotencyKey)
             return WithdrawalReceipt(
                 transferUuid = existingTransferUuid,
                 replayed = true
@@ -39,29 +39,29 @@ class WithdrawalService(
         }
 
         val userAccountIdentifier = accountRepository.ensureUserAccount(
-            userUuid = withdrawal.userUuid,
+            userUuid = withdrawalCommand.userUuid,
             assetType = AssetType.CASH,
-            currency = withdrawal.currency
+            currency = withdrawalCommand.currency
         )
 
         val settlementAccountIdentifier = accountRepository.ensureSettlementAccount(
             assetType = AssetType.CASH,
-            currency = withdrawal.currency
+            currency = withdrawalCommand.currency
         )
 
         ledgerEntryRepository.insert(
             transferId,
             userAccountIdentifier.id,
-            -withdrawal.amount
+            -withdrawalCommand.amount
         )
 
         ledgerEntryRepository.insert(
             transferId,
             settlementAccountIdentifier.id,
-            +withdrawal.amount
+            +withdrawalCommand.amount
         )
 
-        updateAccountsForWithdrawal(userAccountIdentifier, settlementAccountIdentifier, withdrawal)
+        updateAccountsForWithdrawal(userAccountIdentifier, settlementAccountIdentifier, withdrawalCommand)
 
         return WithdrawalReceipt(
             transferUuid = transferUuid,
@@ -72,20 +72,20 @@ class WithdrawalService(
     private fun updateAccountsForWithdrawal(
         userAccountIdentifier: AccountIdentifier,
         settlementAccountIdentifier: AccountIdentifier,
-        withdrawal: Withdrawal,
+        withdrawalCommand: WithdrawalCommand,
     ) {
         listOf(
-            userAccountIdentifier to withdrawal.amount,
-            settlementAccountIdentifier to withdrawal.amount
+            userAccountIdentifier to withdrawalCommand.amount,
+            settlementAccountIdentifier to withdrawalCommand.amount
         )
             .sortedBy { (accountIdentifier, _) -> accountIdentifier.id }
             .forEach { (accountIdentifier, amount) ->
                 if (accountIdentifier.id == userAccountIdentifier.id) {
                     val result = accountRepository.takeFromAvailable(accountIdentifier.id, amount)
-                    if (result < 1) {
+                    if (result == 0) {
                         throw InsufficientFundsException(
                             accountUuid = userAccountIdentifier.uuid,
-                            userUuid = withdrawal.userUuid,
+                            userUuid = withdrawalCommand.userUuid,
                             amount = amount
                         )
                     }

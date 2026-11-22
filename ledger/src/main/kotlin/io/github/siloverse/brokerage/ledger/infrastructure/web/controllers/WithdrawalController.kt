@@ -1,8 +1,8 @@
 package io.github.siloverse.brokerage.ledger.infrastructure.web.controllers
 
-import io.github.siloverse.brokerage.ledger.application.withdrawal.exception.InsufficientFundsException
-import io.github.siloverse.brokerage.ledger.application.withdrawal.model.Withdrawal
+import io.github.siloverse.brokerage.ledger.application.withdrawal.model.WithdrawalCommand
 import io.github.siloverse.brokerage.ledger.application.withdrawal.services.WithdrawalService
+import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.WithdrawalRequest
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.WithdrawalResponse
 import org.springframework.http.HttpStatus
@@ -25,7 +25,7 @@ class WithdrawalController(private val withdrawalService: WithdrawalService) {
         @RequestBody request: WithdrawalRequest,
     ): ResponseEntity<WithdrawalResponse> {
         val receipt = withdrawalService.withdraw(
-            Withdrawal(
+            WithdrawalCommand(
                 idempotencyKey = idempotencyKey,
                 userUuid = request.userUuid,
                 amount = request.amount,

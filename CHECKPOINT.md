@@ -608,3 +608,39 @@ settlement account (it must never go above zero, which the user-side rule alread
 Not yet done: the two-window run by hand and the curl run against the VM database.
 
 Next: 1.3, holds.
+
+## 2026-11-22 — 1.3 Holds, piece 1: place a hold
+
+A hold is a reservation: it promises part of an account to an order so nothing else can
+spend it in the time between the order and its fill. No money moves, so a hold writes no
+transfer and no entry. Only `reserved` changes; `booked` stays; `available` drops.
+
+- **One transaction, three steps.** Ensure the user's account (the hold row needs its id),
+  insert the hold, reserve on the account.
+- **The reference is the idempotency key.** `holds.reference` is the caller's UUID for what
+  the hold is for (an order) and it is unique. The insert uses
+  `on conflict on constraint holds_reference_once do nothing returning id`: no row back
+  means "seen before", and the first hold's uuid is returned.
+- **The check is in the update**, as for a withdrawal:
+  `update accounts set reserved = reserved + :amount where id = :id and available >= :amount`.
+  Zero rows means not enough available; the transaction rolls back and the hold row goes
+  with it.
+- **One rule, two users.** A hold and a withdrawal both test `available`, on the same row.
+  So they queue on that row's lock and each sees what the other left. Five holds and five
+  withdrawals of 30 on a balance of 100 at the same moment: exactly three succeed.
+- **`InsufficientFundsException` moved to `domain/account`.** "Not enough available" is a
+  rule of the account, not of one use case. Its message names no operation.
+- **Commands are named `…Command`** (`DepositCommand`, `WithdrawalCommand`, `HoldCommand`),
+  which leaves "Hold" free for the thing itself.
+
+`POST /api/ledger/holds` with `{reference, userUuid, currency, amount}`: 201 placed, 200
+same reference again, 400 invalid, 409 not enough available. No `Idempotency-Key` header;
+the reference does that job.
+
+Mentioned, not added: holds on positions (shares for a sell order; they arrive with the
+fill); the orders module calling this directly instead of over HTTP (chapter 2); refusing
+the same reference with a different amount (today the first hold is returned as it is).
+
+Not yet done: the by-hand psql run for holds.
+
+Next: piece 2, release a hold; then piece 3, the fill.

@@ -13,21 +13,21 @@ class WithdrawalTest {
 
     @Test
     fun `a withdrawal with a positive amount is valid`() {
-        val withdrawal = Withdrawal(key, user, 10_000, Currency.EUR)
+        val withdrawalCommand = WithdrawalCommand(key, user, 10_000, Currency.EUR)
 
-        assertEquals(10_000, withdrawal.amount)
-        assertEquals(Currency.EUR, withdrawal.currency)
+        assertEquals(10_000, withdrawalCommand.amount)
+        assertEquals(Currency.EUR, withdrawalCommand.currency)
     }
 
     @Test
     fun `an amount of zero is refused`() {
-        val error = assertThrows<IllegalArgumentException> { Withdrawal(key, user, 0, Currency.EUR) }
+        val error = assertThrows<IllegalArgumentException> { WithdrawalCommand(key, user, 0, Currency.EUR) }
 
         assertEquals("amount must be positive", error.message)
     }
 
     @Test
     fun `a negative amount is refused`() {
-        assertThrows<IllegalArgumentException> { Withdrawal(key, user, -1, Currency.EUR) }
+        assertThrows<IllegalArgumentException> { WithdrawalCommand(key, user, -1, Currency.EUR) }
     }
 }

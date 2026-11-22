@@ -1,14 +1,14 @@
-package io.github.siloverse.brokerage.ledger.application.withdrawal.model
+package io.github.siloverse.brokerage.ledger.application.hold.model
 
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
-import java.util.*
+import java.util.UUID
 
-data class Withdrawal(
-    val idempotencyKey: UUID,
+data class HoldCommand(
+    val reference: UUID,
     val userUuid: UUID,
+    val currency: Currency,
     val amount: Long,
-    val currency: Currency
-){
+) {
     init {
         require(amount > 0) { "amount must be positive" }
     }

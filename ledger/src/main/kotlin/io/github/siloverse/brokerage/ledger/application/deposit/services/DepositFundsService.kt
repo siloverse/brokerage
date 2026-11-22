@@ -1,6 +1,6 @@
 package io.github.siloverse.brokerage.ledger.application.deposit.services
 
-import io.github.siloverse.brokerage.ledger.application.deposit.model.Deposit
+import io.github.siloverse.brokerage.ledger.application.deposit.model.DepositCommand
 import io.github.siloverse.brokerage.ledger.application.deposit.model.DepositReceipt
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
@@ -19,17 +19,17 @@ class DepositFundsService(
 ) {
 
     @Transactional(transactionManager = "ledgerTransactionManager")
-    fun deposit(deposit: Deposit): DepositReceipt {
+    fun deposit(depositCommand: DepositCommand): DepositReceipt {
 
         val transferUuid = UuidV7.next()
         val transferId = transferRepository.insert(
             uuid = transferUuid,
             kind = TransferKind.DEPOSIT,
-            idempotencyKey = deposit.idempotencyKey
+            idempotencyKey = depositCommand.idempotencyKey
         )
 
         if (transferId == null) {
-            val existingTransferUuid = transferRepository.findUuidByKey(deposit.idempotencyKey)
+            val existingTransferUuid = transferRepository.findUuidByKey(depositCommand.idempotencyKey)
             return DepositReceipt(
                 transferUuid = existingTransferUuid,
                 replayed = true
@@ -37,29 +37,29 @@ class DepositFundsService(
         }
 
         val userAccountIdentifier = accountRepository.ensureUserAccount(
-            userUuid = deposit.userUuid,
+            userUuid = depositCommand.userUuid,
             assetType = AssetType.CASH,
-            currency = deposit.currency
+            currency = depositCommand.currency
         )
 
         val settlementAccountIdentifier = accountRepository.ensureSettlementAccount(
             assetType = AssetType.CASH,
-            currency = deposit.currency
+            currency = depositCommand.currency
         )
 
         ledgerEntryRepository.insert(
             transferId,
             userAccountIdentifier.id,
-            deposit.amount
+            depositCommand.amount
         )
 
         ledgerEntryRepository.insert(
             transferId,
             settlementAccountIdentifier.id,
-            -deposit.amount
+            -depositCommand.amount
         )
 
-        updateAccountsForDeposit(userAccountIdentifier.id, settlementAccountIdentifier.id, deposit)
+        updateAccountsForDeposit(userAccountIdentifier.id, settlementAccountIdentifier.id, depositCommand)
 
         return DepositReceipt(
             transferUuid = transferUuid,
@@ -70,11 +70,11 @@ class DepositFundsService(
     private fun updateAccountsForDeposit(
         userAccountId: Long,
         settlementAccountId: Long,
-        deposit: Deposit,
+        depositCommand: DepositCommand,
     ) {
         listOf(
-            userAccountId to deposit.amount,
-            settlementAccountId to -deposit.amount
+            userAccountId to depositCommand.amount,
+            settlementAccountId to -depositCommand.amount
         )
             .sortedBy { (accountId, _) -> accountId }
             .forEach { (accountId, amount) ->

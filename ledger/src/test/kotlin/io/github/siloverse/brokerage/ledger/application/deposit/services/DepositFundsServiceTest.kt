@@ -1,7 +1,7 @@
 package io.github.siloverse.brokerage.ledger.application.deposit.services
 
 import io.github.siloverse.brokerage.ledger.BaseUnitTest
-import io.github.siloverse.brokerage.ledger.application.deposit.model.Deposit
+import io.github.siloverse.brokerage.ledger.application.deposit.model.DepositCommand
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
@@ -41,7 +41,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
 
     private val user = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val key = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-    private val deposit = Deposit(key, user, Currency.EUR, 10_000)
+    private val depositCommand = DepositCommand(key, user, Currency.EUR, 10_000)
 
     private val transferId = 1L
     private val userAccountId = 10L
@@ -57,7 +57,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
     fun `a deposit writes two entries that sum to zero and moves both balances`() {
         aNewKey()
 
-        service.deposit(deposit)
+        service.deposit(depositCommand)
 
         verify(ledgerEntryRepository).insert(transferId, userAccountId, 10_000)
         verify(ledgerEntryRepository).insert(transferId, settlementAccountId, -10_000)
@@ -70,7 +70,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
     fun `a deposit returns the uuid of the transfer it wrote`() {
         aNewKey()
 
-        val receipt = service.deposit(deposit)
+        val receipt = service.deposit(depositCommand)
 
         val writtenUuid = argumentCaptor<UUID>()
         verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.DEPOSIT), eq(key))
@@ -82,7 +82,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
     fun `the transfer is written before any entry or balance`() {
         aNewKey()
 
-        service.deposit(deposit)
+        service.deposit(depositCommand)
 
         val order = inOrder(transferRepository, ledgerEntryRepository, accountRepository)
         order.verify(transferRepository).insert(any(), any(), any())
@@ -96,7 +96,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
         whenever(transferRepository.insert(any(), eq(TransferKind.DEPOSIT), eq(key))).thenReturn(null)
         whenever(transferRepository.findUuidByKey(key)).thenReturn(firstTransferUuid)
 
-        val receipt = service.deposit(deposit)
+        val receipt = service.deposit(depositCommand)
 
         assertTrue(receipt.replayed)
         assertEquals(firstTransferUuid, receipt.transferUuid)

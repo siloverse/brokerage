@@ -1,6 +1,6 @@
 package io.github.siloverse.brokerage.ledger.infrastructure.web.controllers
 
-import io.github.siloverse.brokerage.ledger.application.deposit.model.Deposit
+import io.github.siloverse.brokerage.ledger.application.deposit.model.DepositCommand
 import io.github.siloverse.brokerage.ledger.application.deposit.services.DepositFundsService
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.DepositRequest
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.DepositResponse
@@ -24,7 +24,7 @@ class DepositController(private val depositFundsService: DepositFundsService) {
         @RequestBody request: DepositRequest,
     ): ResponseEntity<DepositResponse> {
         val receipt = depositFundsService.deposit(
-            Deposit(
+            DepositCommand(
                 idempotencyKey = idempotencyKey,
                 userUuid = request.userUuid,
                 currency = request.currency,
