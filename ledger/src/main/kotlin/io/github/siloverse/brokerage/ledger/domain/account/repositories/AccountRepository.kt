@@ -11,4 +11,5 @@ interface AccountRepository {
     fun addToBooked(accountId: Long, amount: Long)
     fun takeFromAvailable(accountId: Long, amount: Long): Int
     fun reserve(accountId: Long, amount: Long): Int
+    fun release(accountId: Long, amount: Long): Int
 }

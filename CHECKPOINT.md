@@ -644,3 +644,45 @@ the same reference with a different amount (today the first hold is returned as 
 Not yet done: the by-hand psql run for holds.
 
 Next: piece 2, release a hold; then piece 3, the fill.
+
+## 2026-11-22 — 1.3 Holds, piece 2: release a hold
+
+A release gives the unused rest of a hold back to `available`: the order was cancelled or
+expired. No money moves, so again no transfer and no entry.
+
+- **Addressed by reference, not by hold uuid.** The caller always knows its own order uuid;
+  it may never have seen our hold uuid (a timeout on the place call). The hold uuid stays
+  the hold's public name in answers and logs.
+- **Two statements, hold first.**
+  `update holds set released = amount - consumed where reference = :reference and consumed + released < amount returning account_id, uuid, released`,
+  then `update accounts set reserved = reserved - :released`. The "still open" test is in
+  the first update's `where`, so two releases at the same moment free the money once.
+- **Give back the rest, not the amount.** The first version returned `amount` and would
+  have freed a whole hold after part of it was consumed. With a second open hold on the
+  account nothing would have complained: the user could spend money promised elsewhere.
+- **No `reserved - :amount >= 0` in the account update** (Awais's question). A `where`
+  condition is for a business rule that can honestly be false and has an answer, like
+  `available >= :amount` → 409. `reserved` going negative can only mean our own books are
+  wrong. A `where` would make the update match nothing, silently, and the hold would be
+  closed with the money still reserved. The table constraint fails the transaction instead,
+  loudly, and the hold stays open.
+- **Lock order, corrected.** The hold row first, then account rows in ascending id. The
+  hold says which account to touch, so it has to come first; placing a hold already works
+  that way. A transaction touches one hold, always before any account, so no circle forms.
+- **Safe to repeat.** No open hold matched: one read by reference tells "already closed"
+  (200, nothing to do) from "unknown" (404).
+- **`find…` may find nothing and returns a nullable; `get…` must exist and fails if not.**
+  The place flow uses `getUuidByReference` after an insert conflict, the release flow uses
+  `findUuidByReference`.
+
+`POST /api/ledger/holds/{reference}/release`: 200 released or already closed, 404 unknown
+reference, 400 malformed reference.
+
+Tests fake a partly consumed hold with direct SQL (`consumed` up, `reserved` down), because
+the fill does not exist yet; they should call the real fill once it does.
+
+Mentioned, not added: a partial release; remembering a release that arrives before its hold;
+a fill that arrives after the release (the venue filled an order we had already cancelled —
+it must still be booked, with no reservation behind it; piece 3).
+
+Next: piece 3, the fill.

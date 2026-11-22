@@ -1,7 +1,9 @@
 package io.github.siloverse.brokerage.ledger.application.hold.services
 
+import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
 import io.github.siloverse.brokerage.ledger.application.hold.model.HoldCommand
 import io.github.siloverse.brokerage.ledger.application.hold.model.HoldReceipt
+import io.github.siloverse.brokerage.ledger.application.hold.model.HoldReleaseReceipt
 import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
@@ -9,6 +11,7 @@ import io.github.siloverse.brokerage.ledger.domain.hold.repositories.HoldReposit
 import io.github.siloverse.identifiers.core.UuidV7
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.util.UUID
 
 @Service
 class HoldService(
@@ -33,7 +36,7 @@ class HoldService(
         )
 
         if (holdId == null) {
-            val existingHoldUuid = holdRepository.findUuidByReference(holdCommand.reference)
+            val existingHoldUuid = holdRepository.getUuidByReference(holdCommand.reference)
             return HoldReceipt(
                 holdUuid = existingHoldUuid,
                 replayed = true
@@ -55,6 +58,40 @@ class HoldService(
 
         return HoldReceipt(
             holdUuid = holdUuid,
+            replayed = false
+        )
+    }
+
+    @Transactional(transactionManager = "ledgerTransactionManager")
+    fun releaseHold(reference: UUID): HoldReleaseReceipt {
+
+        val releasedHold = holdRepository.release(
+            reference = reference
+        )
+
+        if (releasedHold == null) {
+            val holdUuid = holdRepository.findUuidByReference(reference)
+            if (holdUuid == null) {
+                throw HoldNotFoundException(
+                    reference = reference
+                )
+            } else {
+                return HoldReleaseReceipt(
+                    holdUuid = holdUuid,
+                    reference = reference,
+                    replayed = true
+                )
+            }
+        }
+
+        accountRepository.release(
+            accountId = releasedHold.accountId,
+            amount = releasedHold.released
+        )
+
+        return HoldReleaseReceipt(
+            holdUuid = releasedHold.uuid,
+            reference = reference,
             replayed = false
         )
     }
