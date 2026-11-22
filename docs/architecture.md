@@ -36,19 +36,28 @@ When a chapter needs an exception, write it down here first.
 ```
 
 - `api` is what other modules may import. Nothing else in the module is visible to them.
-- `application` owns the use cases and the **outbound ports** those use cases need. A port
-  is an interface written in the consumer's words (the Venue port lives in
-  `orders.application.venue`).
+- `application` owns the use cases, one sub-package each (`ledger.application.deposit`):
+  the command, the result, and the service that runs the steps inside one transaction. It
+  also owns the **outbound ports** to other systems, written in the consumer's words (the
+  Venue port lives in `orders.application.venue`). A repository is not such a port: it
+  belongs to its aggregate in `domain`.
 - `domain` keeps business rules free of Spring, persistence, and transport. It may depend
-  on the JDK and Kotlin only.
+  on the JDK and Kotlin only. It follows domain-driven design: one sub-package per
+  **aggregate** (`ledger.domain.account`, `ledger.domain.transfer`), holding the aggregate's
+  types, its rules, and its **repository interface**. The repository is declared where the
+  thing it stores lives; its implementation is in `infrastructure.persistence`.
 - `infrastructure` holds the adapters: the FIX venue adapter is `orders.infrastructure.fix`.
 - Inside `application` and `domain`, sub-packages are named after a **concept or use
-  case** (`application.venue`, `application.placement`, `domain.order`), never after a
-  technical role. Role names such as `mapper`, `repository`, `controller` are allowed only
+  case** (`application.deposit`, `domain.account`) first. Feature first, role second:
+  **inside** each of those, files are grouped by role from the first file on, with the same
+  folder names everywhere: `model` (types, enums, commands, results), `services` (use case
+  services), `repositories` (repository interfaces in `domain`, their implementations in
+  `infrastructure.persistence`), `config`. A role package never sits above a feature:
+  no `application.services`, no `domain.repositories`. Role names such as `mapper`, `repository`, `controller` are allowed only
   inside `infrastructure`, and only within a feature slice (`infrastructure.web`,
-  `infrastructure.persistence`). A package that passes about a dozen files splits by
-  sub-feature. A sub-package is created when its chapter starts, never ahead of it: two
-  files stay flat.
+  `infrastructure.persistence`). A feature that passes about a dozen files in one role
+  folder is probably two features: split by sub-feature. A feature package is created when
+  its chapter starts, never ahead of it.
 - These are packages, never Gradle subprojects. A new subproject needs a different
   consumer or a different lifecycle, not a different layer.
 - Internal domain events stay inside the module. Integration events, the ones other

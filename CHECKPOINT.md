@@ -528,3 +528,41 @@ already on main, because the only database that ever ran it was the dev VM. From
 schema change is a new file.
 
 Next: 1.2, deposits and withdrawals with an `Idempotency-Key`.
+
+## 2026-11-22 — 1.2 Deposits (first half)
+
+By hand first: the deposit as one psql script (transfer, two entries, two balance updates),
+then two windows inserting the same key. The second insert waits for the first transaction
+and is refused when it commits. That wait is the whole idempotency mechanism.
+
+In code:
+
+- **Packages.** DDD, feature first and role second, role folders from the first file:
+  `domain/<aggregate>/{model,repositories}`, `application/<usecase>/{model,services}`,
+  `infrastructure/persistence/{repositories,config}`, `infrastructure/web/{controllers,model}`.
+  Repository interfaces live in `domain` beside their aggregate. Rule book updated.
+- **Repositories without an ORM.** Three interfaces (`TransferRepository`,
+  `AccountRepository`, `LedgerEntryRepository`) with `JdbcClient` implementations. Enums go
+  to SQL as their names; a null user is matched with `is not distinct from`.
+- **`DepositFundsService`**, one transaction on the ledger's manager. The transfer insert
+  comes first with `on conflict do nothing returning id`: a row back means "new, go on", no
+  row means "seen before, return the first receipt". Then both accounts are ensured, two
+  entries written (+user, −settlement), and both balances moved with
+  `set booked = booked + :amount`.
+- **`POST /api/ledger/deposits`** with an `Idempotency-Key` header (a UUID). 201 for a new
+  deposit, 200 for a replay, 400 for a bad amount.
+- **V2** makes `transfers.idempotency_key` unique on its own. A key names one request; the
+  kind adds nothing to that.
+
+Tests: the service with Mockito mocks (`BaseUnitTest` carries the extension), and the
+endpoint against a real PostgreSQL 16 container started by the `jdbc:tc:` URL in the test
+configuration (`BaseIntegrationTest`). Ten concurrent requests with one key book once: one
+201, nine 200. Twenty concurrent users leave every balance equal to the sum of its entries.
+
+Mentioned, not added: loading Mockito as a start-up agent (the self-attach warning is
+harmless on Java 21; it belongs in the build convention plugin); a test that stops the
+database mid-transfer (needs the container object, so the bean style of Testcontainers).
+
+Not yet done: the curl run against the VM database, which also applies V2 there.
+
+Next: withdrawals, where `accounts_no_overdraft` must become a clean refusal.
