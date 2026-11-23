@@ -55,11 +55,49 @@ class JdbcAccountRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClien
         )
     }
 
+    override fun ensureAccount(
+        accountType: AccountType,
+        assetType: AssetType,
+        assetCode: String,
+        userUuid: UUID?,
+    ): AccountIdentifier {
+        val accountIdentifier = insertAccount(
+            accountType = accountType,
+            assetType = assetType,
+            assetCode = assetCode,
+            userUuid = userUuid
+        )
+        if (accountIdentifier != null) {
+            return accountIdentifier
+        }
+        return getAccountIdentifier(
+            accountType = accountType,
+            assetType = assetType,
+            assetCode = assetCode,
+            userUuid = userUuid
+        )
+    }
+
     override fun addToBooked(accountId: Long, amount: Long) {
         jdbc.sql(
             """
                 update accounts
                 set booked = booked + :amount, updated_at = now()
+                where id = :id
+            """.trimIndent()
+        )
+            .param("id", accountId)
+            .param("amount", amount)
+            .update()
+    }
+
+
+
+    override fun removeFromBooked(accountId: Long, amount: Long) {
+        jdbc.sql(
+            """
+                update accounts
+                set booked = booked - :amount, updated_at = now()
                 where id = :id
             """.trimIndent()
         )
@@ -81,6 +119,49 @@ class JdbcAccountRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClien
             .param("amount", amount)
             .update()
     }
+
+    override fun reserve(accountId: Long, amount: Long): Int {
+        return jdbc.sql(
+            """
+                update accounts
+                set reserved = reserved + :amount, updated_at = now()
+                where id = :id 
+                and available >= :amount
+            """.trimIndent()
+        )
+            .param("id", accountId)
+            .param("amount", amount)
+            .update()
+    }
+
+    override fun release(accountId: Long, amount: Long): Int {
+        return jdbc.sql(
+            """
+                update accounts
+                set reserved = reserved - :amount, updated_at = now()
+                where id = :id
+            """.trimIndent()
+        )
+            .param("id", accountId)
+            .param("amount", amount)
+            .update()
+    }
+
+
+    override fun settleReserved(accountId: Long, amount: Long): Int {
+        return jdbc.sql(
+            """
+                update accounts
+                set booked = booked - :amount, reserved = reserved - :amount, updated_at = now()
+                where id = :id
+            """.trimIndent()
+        )
+            .param("id", accountId)
+            .param("amount", amount)
+            .update()
+    }
+
+
 
     private fun insertAccount(
         accountType: AccountType,
@@ -128,32 +209,5 @@ class JdbcAccountRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClien
             .param("asset_code", assetCode)
             .query(AccountIdentifier::class.java)
             .single()
-    }
-
-    override fun reserve(accountId: Long, amount: Long): Int {
-        return jdbc.sql(
-            """
-                update accounts
-                set reserved = reserved + :amount, updated_at = now()
-                where id = :id 
-                and available >= :amount
-            """.trimIndent()
-        )
-            .param("id", accountId)
-            .param("amount", amount)
-            .update()
-    }
-
-    override fun release(accountId: Long, amount: Long): Int {
-        return jdbc.sql(
-            """
-                update accounts
-                set reserved = reserved - :amount, updated_at = now()
-                where id = :id
-            """.trimIndent()
-        )
-            .param("id", accountId)
-            .param("amount", amount)
-            .update()
     }
 }

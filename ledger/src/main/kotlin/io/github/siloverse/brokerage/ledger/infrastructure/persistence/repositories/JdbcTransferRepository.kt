@@ -9,11 +9,11 @@ import java.util.UUID
 
 @Repository
 class JdbcTransferRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClient) : TransferRepository {
-    override fun insert(uuid: UUID, kind: TransferKind, idempotencyKey: UUID): Long? {
+    override fun insert(uuid: UUID, kind: TransferKind, idempotencyKey: UUID, holdId: Long?): Long? {
         return jdbc.sql(
             """
-               insert into transfers (uuid, kind, idempotency_key) 
-               values (:uuid, :kind, :idempotency_key)
+               insert into transfers (uuid, kind, idempotency_key, hold_id) 
+               values (:uuid, :kind, :idempotency_key, :hold_id)
                on conflict on constraint transfers_key_once do nothing
                returning id
             """.trimIndent()
@@ -21,6 +21,7 @@ class JdbcTransferRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClie
             .param("uuid", uuid)
             .param("kind", kind.name)
             .param("idempotency_key", idempotencyKey)
+            .param("hold_id", holdId)
             .query(Long::class.java)
             .optional()
             .orElse(null)

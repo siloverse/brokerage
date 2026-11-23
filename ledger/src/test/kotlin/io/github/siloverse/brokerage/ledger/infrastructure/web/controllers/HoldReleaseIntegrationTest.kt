@@ -45,27 +45,22 @@ class HoldReleaseIntegrationTest : BaseIntegrationTest() {
         return reference
     }
 
-    /**
-     * What a fill will do to the hold and to `reserved`, until the fill itself exists. It
-     * leaves `booked` alone: a balance change without entries would break the books that
-     * other tests check across the whole database.
-     */
-    private fun consume(reference: UUID, amount: Long) {
-        jdbc.sql("update holds set consumed = consumed + :amount where reference = :reference")
-            .param("amount", amount).param("reference", reference).update()
-        jdbc.sql(
-            """
-            update accounts set reserved = reserved - :amount
-            where id = (select account_id from holds where reference = :reference)
-            """.trimIndent()
-        ).param("amount", amount).param("reference", reference).update()
+    /** A real fill of the given total (price plus a fee of 100) against the hold. */
+    private fun consume(reference: UUID, total: Long) {
+        val result = mvc.perform(
+            post("/api/ledger/fills")
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"reference":"$reference","assetCode":"ACME","quantity":1,"amount":${total - 100},"fee":100}""")
+        ).andReturn()
+        assertEquals(201, result.response.status)
     }
 
     private fun holdUuid(result: MvcResult): String =
         Regex("\"holdUuid\":\"([^\"]+)\"").find(result.response.contentAsString)!!.groupValues[1]
 
     private fun balance(user: UUID): Balance =
-        jdbc.sql("select booked, reserved, available from accounts where user_uuid = :user").param("user", user)
+        jdbc.sql("select booked, reserved, available from accounts where user_uuid = :user and asset_type = 'CASH'").param("user", user)
             .query { rs, _ -> Balance(rs.getLong("booked"), rs.getLong("reserved"), rs.getLong("available")) }
             .single()
 
@@ -125,7 +120,7 @@ class HoldReleaseIntegrationTest : BaseIntegrationTest() {
         assertEquals(200, release(reference).response.status)
 
         assertEquals(HoldRow(amount = 50_500, consumed = 20_200, released = 30_300), holdRow(reference))
-        assertEquals(Balance(booked = 100_000, reserved = 40_000, available = 60_000), balance(user))
+        assertEquals(Balance(booked = 79_800, reserved = 40_000, available = 39_800), balance(user))
         assertEquals(HoldRow(amount = 40_000, consumed = 0, released = 0), holdRow(other))
         assertEquals(balance(user).reserved, openHolds(user))
     }
@@ -139,7 +134,7 @@ class HoldReleaseIntegrationTest : BaseIntegrationTest() {
         assertEquals(200, release(reference).response.status)
 
         assertEquals(HoldRow(amount = 50_500, consumed = 50_500, released = 0), holdRow(reference))
-        assertEquals(Balance(booked = 100_000, reserved = 0, available = 100_000), balance(user))
+        assertEquals(Balance(booked = 49_500, reserved = 0, available = 49_500), balance(user))
     }
 
     @Test
