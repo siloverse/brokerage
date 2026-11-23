@@ -16,9 +16,11 @@ import org.junit.jupiter.api.Test
 import org.mockito.InjectMocks
 import org.mockito.Mock
 import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.inOrder
+import org.mockito.kotlin.isNull
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoInteractions
 import org.mockito.kotlin.verifyNoMoreInteractions
@@ -48,7 +50,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
     private val settlementAccountId = 20L
 
     private fun aNewKey() {
-        whenever(transferRepository.insert(any(), eq(TransferKind.DEPOSIT), eq(key))).thenReturn(transferId)
+        whenever(transferRepository.insert(any(), eq(TransferKind.DEPOSIT), eq(key), isNull())).thenReturn(transferId)
         whenever(accountRepository.ensureUserAccount(user, AssetType.CASH, Currency.EUR)).thenReturn(AccountIdentifier(userAccountId, UUID.randomUUID()))
         whenever(accountRepository.ensureSettlementAccount(AssetType.CASH, Currency.EUR)).thenReturn(AccountIdentifier(settlementAccountId, UUID.randomUUID()))
     }
@@ -63,7 +65,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
         verify(ledgerEntryRepository).insert(transferId, settlementAccountId, -10_000)
         verifyNoMoreInteractions(ledgerEntryRepository)
         verify(accountRepository).addToBooked(userAccountId, 10_000)
-        verify(accountRepository).addToBooked(settlementAccountId, -10_000)
+        verify(accountRepository).removeFromBooked(settlementAccountId, 10_000)
     }
 
     @Test
@@ -73,7 +75,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
         val receipt = service.deposit(depositCommand)
 
         val writtenUuid = argumentCaptor<UUID>()
-        verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.DEPOSIT), eq(key))
+        verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.DEPOSIT), eq(key), isNull())
         assertFalse(receipt.replayed)
         assertEquals(writtenUuid.firstValue, receipt.transferUuid)
     }
@@ -85,7 +87,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
         service.deposit(depositCommand)
 
         val order = inOrder(transferRepository, ledgerEntryRepository, accountRepository)
-        order.verify(transferRepository).insert(any(), any(), any())
+        order.verify(transferRepository).insert(any(), any(), any(), anyOrNull())
         order.verify(ledgerEntryRepository).insert(transferId, userAccountId, 10_000)
         order.verify(accountRepository).addToBooked(userAccountId, 10_000)
     }
@@ -93,7 +95,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
     @Test
     fun `a key seen before returns the first transfer and writes nothing`() {
         val firstTransferUuid = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
-        whenever(transferRepository.insert(any(), eq(TransferKind.DEPOSIT), eq(key))).thenReturn(null)
+        whenever(transferRepository.insert(any(), eq(TransferKind.DEPOSIT), eq(key), isNull())).thenReturn(null)
         whenever(transferRepository.findUuidByKey(key)).thenReturn(firstTransferUuid)
 
         val receipt = service.deposit(depositCommand)

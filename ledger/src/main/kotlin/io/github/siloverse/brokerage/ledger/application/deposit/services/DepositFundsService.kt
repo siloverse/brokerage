@@ -74,11 +74,14 @@ class DepositFundsService(
     ) {
         listOf(
             userAccountId to depositCommand.amount,
-            settlementAccountId to -depositCommand.amount
+            settlementAccountId to depositCommand.amount
         )
             .sortedBy { (accountId, _) -> accountId }
             .forEach { (accountId, amount) ->
-                accountRepository.addToBooked(accountId, amount)
+                when (accountId) {
+                    userAccountId -> accountRepository.addToBooked(accountId, amount)
+                    settlementAccountId -> accountRepository.removeFromBooked(accountId, amount)
+                }
             }
     }
 }

@@ -21,6 +21,7 @@ import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.inOrder
+import org.mockito.kotlin.isNull
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoInteractions
@@ -50,7 +51,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
     private val userAccountUuid = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc")
 
     private fun aNewKey(userAccountId: Long = 10L, settlementAccountId: Long = 20L) {
-        whenever(transferRepository.insert(any(), eq(TransferKind.WITHDRAWAL), eq(key))).thenReturn(transferId)
+        whenever(transferRepository.insert(any(), eq(TransferKind.WITHDRAWAL), eq(key), isNull())).thenReturn(transferId)
         whenever(accountRepository.ensureUserAccount(user, AssetType.CASH, Currency.EUR))
             .thenReturn(AccountIdentifier(userAccountId, userAccountUuid))
         whenever(accountRepository.ensureSettlementAccount(AssetType.CASH, Currency.EUR))
@@ -79,7 +80,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         val receipt = service.withdraw(withdrawalCommand)
 
         val writtenUuid = argumentCaptor<UUID>()
-        verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.WITHDRAWAL), eq(key))
+        verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.WITHDRAWAL), eq(key), isNull())
         assertFalse(receipt.replayed)
         assertEquals(writtenUuid.firstValue, receipt.transferUuid)
     }
@@ -133,7 +134,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
     @Test
     fun `a key seen before returns the first transfer and writes nothing`() {
         val firstTransferUuid = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
-        whenever(transferRepository.insert(any(), eq(TransferKind.WITHDRAWAL), eq(key))).thenReturn(null)
+        whenever(transferRepository.insert(any(), eq(TransferKind.WITHDRAWAL), eq(key), isNull())).thenReturn(null)
         whenever(transferRepository.findUuidByKey(key)).thenReturn(firstTransferUuid)
 
         val receipt = service.withdraw(withdrawalCommand)

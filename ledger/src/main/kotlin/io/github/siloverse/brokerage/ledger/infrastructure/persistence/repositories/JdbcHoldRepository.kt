@@ -1,6 +1,7 @@
 package io.github.siloverse.brokerage.ledger.infrastructure.persistence.repositories
 
 import io.github.siloverse.brokerage.ledger.domain.hold.model.ReleasedHold
+import io.github.siloverse.brokerage.ledger.domain.hold.model.UserHold
 import io.github.siloverse.brokerage.ledger.domain.hold.repositories.HoldRepository
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.jdbc.core.simple.JdbcClient
@@ -68,6 +69,35 @@ class JdbcHoldRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClient) 
         )
             .param("reference", reference)
             .query(ReleasedHold::class.java)
+            .optional()
+            .orElse(null)
+    }
+
+    override fun consumeHold(id: Long, amount: Long): Int {
+        return jdbc.sql(
+            """
+                update holds
+                set consumed = consumed + :amount
+                where id = :id
+                and amount - consumed - released >= :amount
+            """.trimIndent()
+        )
+            .param("id", id)
+            .param("amount", amount)
+            .update()
+    }
+
+    override fun findUserHoldByReference(reference: UUID): UserHold? {
+        return jdbc.sql(
+            """
+               select h.id as hold_id, h.uuid as hold_uuid, a.id as account_id, a.user_uuid, a.asset_code
+               from holds h
+               join accounts a on h.account_id=a.id
+               where h.reference = :reference
+            """.trimIndent()
+        )
+            .param("reference", reference)
+            .query(UserHold::class.java)
             .optional()
             .orElse(null)
     }

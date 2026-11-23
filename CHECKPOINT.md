@@ -686,3 +686,60 @@ a fill that arrives after the release (the venue filled an order we had already 
 it must still be booked, with no reservation behind it; piece 3).
 
 Next: piece 3, the fill.
+
+## 2026-11-23 — 1.3 Holds, piece 3a: the fill of a buy order
+
+The fill is where money and shares really change owner. It is the first hold operation that
+writes a transfer and entries, the first transfer that touches two assets, and the first
+time shares exist in the ledger.
+
+Example: a hold of 50,500 for "10 ACME at 50 € plus up to 5 € fee"; the venue reports 4
+shares at 50 € with a fee of 2 €.
+
+- **One `FILL` transfer, six entries, three pairs.** User cash −20,000 / venue settlement
+  cash +20,000 (the price). User cash −200 / fee income +200 (the fee). Venue position −4 /
+  user position +4 (the shares). EUR sums to zero and ACME sums to zero, each on its own.
+  With a fee of zero the fee pair is skipped: the table refuses an entry of 0.
+- **The hold is consumed by price plus fee**, with the check in the update:
+  `update holds set consumed = consumed + :total where id = :id and amount - consumed - released >= :total`.
+  The first version consumed the price only; the hold's rest and the account's `reserved`
+  would then have drifted apart by the fee on every fill.
+- **`settleReserved`** on the user's cash: `booked` and `reserved` both go down by the total
+  in one statement, so `available` does not move. The hold had already set the money aside.
+- **Two ids, two jobs.** `reference` (the order's uuid) finds the hold; the execution uuid
+  is the idempotency key. One order has many fills, so the reference cannot be the key.
+- **The transfer carries the hold id.** The table demands it for a `FILL`
+  (`transfers_fill_has_hold`), so the hold is read first, then the transfer is inserted.
+- **Order of work:** read the hold, insert the transfer (the gate), consume the hold, ensure
+  the accounts, write the entries, update five account rows in ascending id. The hold row is
+  locked before any account row.
+- **The ledger reads the user and the currency from the hold's account.** The caller sends
+  the instrument, the quantity, the price already multiplied, and the fee. The ledger does
+  not multiply prices and does not trust a second copy of who the user is.
+- **Instruments are text, currencies stay an enum.** `ensureAccount(type, assetType, code, user)`
+  is the general form; the fill needs a position account per instrument and a fee income
+  account.
+- **`addToBooked` and `removeFromBooked` both take a positive amount.** One direction per
+  method. (Mixing "remove" with a negative amount booked the deposit's settlement side the
+  wrong way for a moment; the integration test caught it.)
+
+`POST /api/ledger/fills` with the execution uuid as `Idempotency-Key` and
+`{reference, assetCode, quantity, amount, fee}`: 201 booked, 200 same execution again,
+400 invalid, 404 no hold for the reference, 409 the hold has too little left.
+
+Tests: ten fills of 30 on a hold of 90 at the same moment book exactly three. Ten fills, ten
+deposits and ten withdrawals for one user at the same moment all succeed with no deadlock
+and exact books. Ten users filled in one instrument at once leave the venue's position at
+exactly −20. The release tests now use the real fill instead of faking a consumed hold.
+
+**Known gap, must be fixed:** a fill the hold cannot cover (the hold was already released,
+or the fill costs more than was reserved) is refused with 409. A fill is a fact; refusing it
+loses a real trade and the books stop matching the venue. The plan: take the rest from
+`available`, and book what is still missing against the suspense account. It waits for the
+sell side, which has the same problem with shares.
+
+Mentioned, not added: the sell side (a hold on shares, the fill in the other direction);
+`side` on the command; a check of the amount against the order's limit (orders knows the
+limit, the ledger does not).
+
+Next: piece 3b, the sell side; then the fill the hold cannot cover.
