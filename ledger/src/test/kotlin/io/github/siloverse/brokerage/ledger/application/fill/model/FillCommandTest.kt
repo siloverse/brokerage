@@ -1,5 +1,6 @@
 package io.github.siloverse.brokerage.ledger.application.fill.model
 
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -11,7 +12,7 @@ class FillCommandTest {
     private val reference = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 
     private fun command(assetCode: String = "ACME", quantity: Long = 4, amount: Long = 20_000, fee: Long = 200) =
-        FillCommand(execution, reference, assetCode, quantity, amount, fee)
+        FillCommand(execution, reference, assetCode, quantity, Currency.EUR, amount, fee)
 
     @Test
     fun `a fill with shares, a price and a fee is valid`() {
@@ -50,5 +51,12 @@ class FillCommandTest {
     @Test
     fun `a negative fee is refused`() {
         assertEquals("fee must not be negative", assertThrows<IllegalArgumentException> { command(fee = -1) }.message)
+    }
+
+    @Test
+    fun `the fee must be smaller than the price`() {
+        assertEquals(19_999, command(fee = 19_999).fee)
+        assertThrows<IllegalArgumentException> { command(fee = 20_000) }
+        assertThrows<IllegalArgumentException> { command(fee = 20_001) }
     }
 }

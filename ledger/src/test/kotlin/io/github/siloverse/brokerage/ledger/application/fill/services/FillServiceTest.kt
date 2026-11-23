@@ -7,6 +7,7 @@ import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFo
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AccountType
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
 import io.github.siloverse.brokerage.ledger.domain.hold.model.UserHold
 import io.github.siloverse.brokerage.ledger.domain.hold.repositories.HoldRepository
@@ -52,7 +53,7 @@ class FillServiceTest : BaseUnitTest() {
     private val reference = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
     private val execution = UUID.fromString("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
     private val holdUuid = UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd")
-    private val command = FillCommand(execution, reference, "ACME", quantity = 4, amount = 20_000, fee = 200)
+    private val command = FillCommand(execution, reference, "ACME", quantity = 4, currency = Currency.EUR, amount = 20_000, fee = 200)
 
     private val holdId = 7L
     private val transferId = 1L
@@ -64,7 +65,7 @@ class FillServiceTest : BaseUnitTest() {
 
     private fun aHold() {
         whenever(holdRepository.findUserHoldByReference(reference))
-            .thenReturn(UserHold(holdId, holdUuid, userCash, user, "EUR"))
+            .thenReturn(UserHold(holdId, holdUuid, userCash, user, "EUR", AssetType.CASH))
     }
 
     private fun aNewExecution() {
@@ -92,7 +93,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a fill writes six entries, the price, the fee and the shares each as a pair that sums to zero`() {
         aFillThatFits()
 
-        service.buyFill(command)
+        service.fill(command)
 
         verify(ledgerEntryRepository).insert(transferId, userCash, -20_000)
         verify(ledgerEntryRepository).insert(transferId, settlementCash, 20_000)
@@ -107,7 +108,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a fill moves each balance by the sum of that account's entries`() {
         aFillThatFits()
 
-        service.buyFill(command)
+        service.fill(command)
 
         verify(accountRepository).settleReserved(userCash, 20_200)
         verify(accountRepository).addToBooked(settlementCash, 20_000)
@@ -120,7 +121,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `the user's cash leaves through the reservation, never through a plain balance change`() {
         aFillThatFits()
 
-        service.buyFill(command)
+        service.fill(command)
 
         verify(accountRepository, never()).addToBooked(eq(userCash), any())
         verify(accountRepository, never()).removeFromBooked(eq(userCash), any())
@@ -131,7 +132,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `the hold is consumed by the price plus the fee`() {
         aFillThatFits()
 
-        service.buyFill(command)
+        service.fill(command)
 
         verify(holdRepository).consumeHold(holdId, 20_200)
     }
@@ -140,7 +141,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `the transfer carries the hold and its uuid is returned`() {
         aFillThatFits()
 
-        val receipt = service.buyFill(command)
+        val receipt = service.fill(command)
 
         val writtenUuid = argumentCaptor<UUID>()
         verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.FILL), eq(execution), eq(holdId))
@@ -152,7 +153,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a fee of zero writes no fee entries`() {
         aFillThatFits(total = 20_000)
 
-        service.buyFill(command.copy(fee = 0))
+        service.fill(command.copy(fee = 0))
 
         verify(ledgerEntryRepository).insert(transferId, userCash, -20_000)
         verify(ledgerEntryRepository).insert(transferId, settlementCash, 20_000)
@@ -166,7 +167,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `the hold is consumed before any account, and the accounts change in ascending id order`() {
         aFillThatFits()
 
-        service.buyFill(command)
+        service.fill(command)
 
         val order = inOrder(transferRepository, holdRepository, accountRepository)
         order.verify(transferRepository).insert(any(), any(), any(), any())
@@ -183,7 +184,7 @@ class FillServiceTest : BaseUnitTest() {
         aNewExecution()
         whenever(holdRepository.consumeHold(holdId, 20_200)).thenReturn(0)
 
-        val error = assertThrows<HoldFillException> { service.buyFill(command) }
+        val error = assertThrows<HoldFillException> { service.fill(command) }
 
         assertTrue(error.message!!.contains(holdUuid.toString()))
         assertTrue(error.message!!.contains(reference.toString()))
@@ -195,7 +196,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `an unknown reference is refused before anything is written`() {
         whenever(holdRepository.findUserHoldByReference(reference)).thenReturn(null)
 
-        val error = assertThrows<HoldNotFoundException> { service.buyFill(command) }
+        val error = assertThrows<HoldNotFoundException> { service.fill(command) }
 
         assertTrue(error.message!!.contains(reference.toString()))
         verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
@@ -208,11 +209,117 @@ class FillServiceTest : BaseUnitTest() {
         whenever(transferRepository.insert(any(), eq(TransferKind.FILL), eq(execution), eq(holdId))).thenReturn(null)
         whenever(transferRepository.findUuidByKey(execution)).thenReturn(firstTransferUuid)
 
-        val receipt = service.buyFill(command)
+        val receipt = service.fill(command)
 
         assertTrue(receipt.replayed)
         assertEquals(firstTransferUuid, receipt.transferUuid)
         verify(holdRepository, never()).consumeHold(any(), any())
         verifyNoInteractions(accountRepository, ledgerEntryRepository)
+    }
+
+    private fun aSellHold(instrument: String = "ACME") {
+        whenever(holdRepository.findUserHoldByReference(reference))
+            .thenReturn(UserHold(holdId, holdUuid, userPosition, user, instrument, AssetType.POSITION))
+    }
+
+    private fun aSellThatFits() {
+        aSellHold()
+        whenever(transferRepository.insert(any(), eq(TransferKind.FILL), eq(execution), eq(holdId))).thenReturn(transferId)
+        whenever(holdRepository.consumeHold(holdId, 4)).thenReturn(1)
+        theAccounts()
+    }
+
+    @Test
+    fun `a sell writes six entries, the shares out, the price in, and the fee out of the proceeds`() {
+        aSellThatFits()
+
+        service.fill(command)
+
+        verify(ledgerEntryRepository).insert(transferId, userPosition, -4)
+        verify(ledgerEntryRepository).insert(transferId, venuePosition, 4)
+        verify(ledgerEntryRepository).insert(transferId, settlementCash, -20_000)
+        verify(ledgerEntryRepository).insert(transferId, userCash, 20_000)
+        verify(ledgerEntryRepository).insert(transferId, userCash, -200)
+        verify(ledgerEntryRepository).insert(transferId, feeIncome, 200)
+        verifyNoMoreInteractions(ledgerEntryRepository)
+    }
+
+    @Test
+    fun `a sell moves each balance by the sum of that account's entries`() {
+        aSellThatFits()
+
+        service.fill(command)
+
+        verify(accountRepository).settleReserved(userPosition, 4)
+        verify(accountRepository).addToBooked(venuePosition, 4)
+        verify(accountRepository).removeFromBooked(settlementCash, 20_000)
+        verify(accountRepository).addToBooked(userCash, 19_800)
+        verify(accountRepository).addToBooked(feeIncome, 200)
+    }
+
+    @Test
+    fun `a sell consumes the hold by the number of shares, not by the money`() {
+        aSellThatFits()
+
+        service.fill(command)
+
+        verify(holdRepository).consumeHold(holdId, 4)
+    }
+
+    @Test
+    fun `in a sell the shares leave through the reservation and the cash is never reserved`() {
+        aSellThatFits()
+
+        service.fill(command)
+
+        verify(accountRepository, never()).settleReserved(eq(userCash), any())
+        verify(accountRepository, never()).removeFromBooked(eq(userPosition), any())
+        verify(accountRepository, never()).addToBooked(eq(userPosition), any())
+    }
+
+    @Test
+    fun `a sell consumes the hold before any account, and the accounts change in ascending id order`() {
+        aSellThatFits()
+
+        service.fill(command)
+
+        val order = inOrder(transferRepository, holdRepository, accountRepository)
+        order.verify(transferRepository).insert(any(), any(), any(), any())
+        order.verify(holdRepository).consumeHold(holdId, 4)
+        order.verify(accountRepository).addToBooked(userCash, 19_800)
+        order.verify(accountRepository).removeFromBooked(settlementCash, 20_000)
+        order.verify(accountRepository).settleReserved(userPosition, 4)
+        order.verify(accountRepository).addToBooked(venuePosition, 4)
+        order.verify(accountRepository).addToBooked(feeIncome, 200)
+    }
+
+    @Test
+    fun `a share hold with too few shares left refuses the sell and changes nothing else`() {
+        aSellHold()
+        whenever(transferRepository.insert(any(), eq(TransferKind.FILL), eq(execution), eq(holdId))).thenReturn(transferId)
+        whenever(holdRepository.consumeHold(holdId, 4)).thenReturn(0)
+
+        assertThrows<HoldFillException> { service.fill(command) }
+
+        verifyNoInteractions(accountRepository, ledgerEntryRepository)
+    }
+
+    @Test
+    fun `a fill for another instrument than the share hold is refused before anything is written`() {
+        aSellHold(instrument = "OTHER")
+
+        assertThrows<IllegalArgumentException> { service.fill(command) }
+
+        verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
+    }
+
+    @Test
+    fun `a fill in another currency than the cash hold is refused before anything is written`() {
+        whenever(holdRepository.findUserHoldByReference(reference))
+            .thenReturn(UserHold(holdId, holdUuid, userCash, user, "USD", AssetType.CASH))
+
+        assertThrows<IllegalArgumentException> { service.fill(command) }
+
+        verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
     }
 }

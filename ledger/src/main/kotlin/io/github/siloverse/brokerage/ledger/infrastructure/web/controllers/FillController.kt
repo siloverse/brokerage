@@ -25,12 +25,13 @@ class FillController(private val fillService: FillService) {
         @RequestHeader("Idempotency-Key") executionUuid: UUID,
         @RequestBody request: FillRequest,
     ): ResponseEntity<FillResponse> {
-        val receipt = fillService.buyFill(
+        val receipt = fillService.fill(
             FillCommand(
                 executionUuid = executionUuid,
                 reference = request.reference,
                 assetCode = request.assetCode,
                 quantity = request.quantity,
+                currency = request.currency,
                 amount = request.amount,
                 fee = request.fee,
             )

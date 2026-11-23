@@ -25,7 +25,7 @@ class FillIntegrationTest : BaseIntegrationTest() {
     ): MvcResult {
         val request = post("/api/ledger/fills")
             .contentType(MediaType.APPLICATION_JSON)
-            .content("""{"reference":"$reference","assetCode":"$instrument","quantity":$quantity,"amount":$amount,"fee":$fee}""")
+            .content("""{"reference":"$reference","assetCode":"$instrument","currency":"EUR","quantity":$quantity,"amount":$amount,"fee":$fee}""")
         if (execution != null) request.header("Idempotency-Key", execution.toString())
         return mvc.perform(request).andReturn()
     }
@@ -49,7 +49,7 @@ class FillIntegrationTest : BaseIntegrationTest() {
         val result = mvc.perform(
             post("/api/ledger/holds")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"reference":"$reference","userUuid":"$user","currency":"EUR","amount":$amount}""")
+                .content("""{"reference":"$reference","userUuid":"$user","assetType":"CASH","assetCode":"EUR","amount":$amount}""")
         ).andReturn()
         assertEquals(201, result.response.status)
         return reference

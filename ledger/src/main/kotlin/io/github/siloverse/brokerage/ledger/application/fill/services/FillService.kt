@@ -7,7 +7,9 @@ import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFo
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AccountType
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
+import io.github.siloverse.brokerage.ledger.domain.hold.model.UserHold
 import io.github.siloverse.brokerage.ledger.domain.hold.repositories.HoldRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.LedgerEntryRepository
@@ -23,29 +25,39 @@ class FillService(
     private val accountRepository: AccountRepository,
     private val ledgerEntryRepository: LedgerEntryRepository
 ) {
-
     @Transactional(transactionManager = "ledgerTransactionManager")
-    fun buyFill(fillCommand: FillCommand): FillReceipt {
-
+    fun fill(fillCommand: FillCommand): FillReceipt {
         val userHold = holdRepository.findUserHoldByReference(fillCommand.reference) ?: throw HoldNotFoundException(
             reference = fillCommand.reference
         )
+        when (userHold.assetType) {
+            AssetType.CASH -> require(userHold.assetCode == fillCommand.currency.name) { "the hold is in another currency" }
+            AssetType.POSITION -> require(userHold.assetCode == fillCommand.assetCode) { "the hold is on another instrument" }
+        }
+
         val transferUuid = UuidV7.next()
         val transferId = transferRepository.insert(
             uuid = transferUuid,
             kind = TransferKind.FILL,
             idempotencyKey = fillCommand.executionUuid,
             holdId = userHold.holdId
+        ) ?: return FillReceipt(
+            transferUuid = transferRepository.findUuidByKey(fillCommand.executionUuid),
+            replayed = true
         )
 
-        if (transferId == null) {
-            val existingTransferUuid = transferRepository.findUuidByKey(fillCommand.executionUuid)
-            return FillReceipt(
-                transferUuid = existingTransferUuid,
-                replayed = true
-            )
+        when (userHold.assetType) {
+            AssetType.CASH -> bookBuy(fillCommand, userHold, transferId)
+            AssetType.POSITION -> bookSell(fillCommand, userHold, transferId)
         }
 
+        return FillReceipt(
+            transferUuid = transferUuid,
+            replayed = false
+        )
+    }
+
+    private fun bookBuy(fillCommand: FillCommand, userHold: UserHold, transferId: Long) {
         val updates = holdRepository.consumeHold(
             id = userHold.holdId,
             amount = fillCommand.amount + fillCommand.fee
@@ -132,7 +144,7 @@ class FillService(
             amount = -fillCommand.quantity
         )
 
-        updateAccountsForFill(
+        updateAccountsForBuyFill(
             userPositionAccountIdentifier = userPositionAccountIdentifier,
             userCashAccountIdentifier = userCashAccountIdentifier,
             settlementPositionAccountIdentifier = settlementPositionAccountIdentifier,
@@ -140,14 +152,9 @@ class FillService(
             feeIncomeAccountIdentifier = feeIncomeAccountIdentifier,
             fillCommand = fillCommand
         )
-
-        return FillReceipt(
-            transferUuid = transferUuid,
-            replayed = false
-        )
     }
 
-    private fun updateAccountsForFill(
+    private fun updateAccountsForBuyFill(
         userPositionAccountIdentifier: AccountIdentifier,
         userCashAccountIdentifier: AccountIdentifier,
         settlementPositionAccountIdentifier: AccountIdentifier,
@@ -167,6 +174,128 @@ class FillService(
                 when (account.id) {
                     userCashAccountIdentifier.id -> accountRepository.settleReserved(account.id, amount)
                     settlementPositionAccountIdentifier.id -> accountRepository.removeFromBooked(account.id, amount)
+                    else -> accountRepository.addToBooked(account.id, amount)
+                }
+            }
+    }
+
+    private fun bookSell(fillCommand: FillCommand, userHold: UserHold, transferId: Long) {
+        val updates = holdRepository.consumeHold(
+            id = userHold.holdId,
+            amount = fillCommand.quantity
+        )
+
+        if (updates == 0) {
+            throw HoldFillException(
+                message = "Unable to consume the Hold to sell shares position as too low consumable hold shares are left",
+                holdUuid = userHold.holdUuid,
+                executionUuid = fillCommand.executionUuid,
+                reference = fillCommand.reference,
+                amount = fillCommand.quantity
+            )
+        }
+
+        val userPositionAccountIdentifier = accountRepository.ensureAccount(
+            accountType = AccountType.USER,
+            assetType = AssetType.POSITION,
+            assetCode = fillCommand.assetCode,
+            userUuid = userHold.userUuid
+        )
+
+        val userCashAccountIdentifier = accountRepository.ensureAccount(
+            accountType = AccountType.USER,
+            assetType = AssetType.CASH,
+            assetCode = fillCommand.currency.name,
+            userUuid = userHold.userUuid
+        )
+
+        val settlementPositionAccountIdentifier = accountRepository.ensureAccount(
+            accountType = AccountType.VENUE_SETTLEMENT,
+            assetType = AssetType.POSITION,
+            assetCode = fillCommand.assetCode,
+        )
+
+        val settlementCashAccountIdentifier = accountRepository.ensureAccount(
+            accountType = AccountType.VENUE_SETTLEMENT,
+            assetType = AssetType.CASH,
+            assetCode = fillCommand.currency.name,
+        )
+
+        val feeIncomeAccountIdentifier = accountRepository.ensureAccount(
+            accountType = AccountType.FEE_INCOME,
+            assetType = AssetType.CASH,
+            assetCode = fillCommand.currency.name,
+        )
+
+        ledgerEntryRepository.insert(
+            transferId = transferId,
+            accountId = userCashAccountIdentifier.id,
+            amount = fillCommand.amount
+        )
+
+        if (fillCommand.fee != 0L) {
+
+            ledgerEntryRepository.insert(
+                transferId = transferId,
+                accountId = feeIncomeAccountIdentifier.id,
+                amount = fillCommand.fee
+            )
+
+            ledgerEntryRepository.insert(
+                transferId = transferId,
+                accountId = userCashAccountIdentifier.id,
+                amount = -fillCommand.fee
+            )
+        }
+
+        ledgerEntryRepository.insert(
+            transferId = transferId,
+            accountId = settlementCashAccountIdentifier.id,
+            amount = -fillCommand.amount
+        )
+
+        ledgerEntryRepository.insert(
+            transferId = transferId,
+            accountId = userPositionAccountIdentifier.id,
+            amount = -fillCommand.quantity
+        )
+
+        ledgerEntryRepository.insert(
+            transferId = transferId,
+            accountId = settlementPositionAccountIdentifier.id,
+            amount = +fillCommand.quantity
+        )
+
+        updateAccountsForSellFill(
+            userPositionAccountIdentifier = userPositionAccountIdentifier,
+            userCashAccountIdentifier = userCashAccountIdentifier,
+            settlementPositionAccountIdentifier = settlementPositionAccountIdentifier,
+            settlementCashAccountIdentifier = settlementCashAccountIdentifier,
+            feeIncomeAccountIdentifier = feeIncomeAccountIdentifier,
+            fillCommand = fillCommand
+        )
+    }
+
+    private fun updateAccountsForSellFill(
+        userPositionAccountIdentifier: AccountIdentifier,
+        userCashAccountIdentifier: AccountIdentifier,
+        settlementPositionAccountIdentifier: AccountIdentifier,
+        settlementCashAccountIdentifier: AccountIdentifier,
+        feeIncomeAccountIdentifier: AccountIdentifier,
+        fillCommand: FillCommand
+    ) {
+        listOf(
+            userPositionAccountIdentifier to fillCommand.quantity,
+            userCashAccountIdentifier to fillCommand.amount - fillCommand.fee,
+            settlementPositionAccountIdentifier to fillCommand.quantity,
+            settlementCashAccountIdentifier to fillCommand.amount,
+            feeIncomeAccountIdentifier to fillCommand.fee
+        )
+            .sortedBy { (account, _) -> account.id }
+            .forEach { (account, amount) ->
+                when (account.id) {
+                    userPositionAccountIdentifier.id -> accountRepository.settleReserved(account.id, amount)
+                    settlementCashAccountIdentifier.id -> accountRepository.removeFromBooked(account.id, amount)
                     else -> accountRepository.addToBooked(account.id, amount)
                 }
             }

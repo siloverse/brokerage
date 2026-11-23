@@ -90,7 +90,7 @@ class JdbcHoldRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClient) 
     override fun findUserHoldByReference(reference: UUID): UserHold? {
         return jdbc.sql(
             """
-               select h.id as hold_id, h.uuid as hold_uuid, a.id as account_id, a.user_uuid, a.asset_code
+               select h.id as hold_id, h.uuid as hold_uuid, a.id as account_id, a.user_uuid, a.asset_code, a.asset_type
                from holds h
                join accounts a on h.account_id=a.id
                where h.reference = :reference

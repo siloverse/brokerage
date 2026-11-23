@@ -5,8 +5,8 @@ import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFo
 import io.github.siloverse.brokerage.ledger.application.hold.model.HoldCommand
 import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AccountType
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
-import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
 import io.github.siloverse.brokerage.ledger.domain.hold.model.ReleasedHold
 import io.github.siloverse.brokerage.ledger.domain.hold.repositories.HoldRepository
@@ -40,14 +40,14 @@ class HoldServiceTest : BaseUnitTest() {
 
     private val user = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val reference = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-    private val command = HoldCommand(reference, user, Currency.EUR, 50_500)
+    private val command = HoldCommand(reference, user, AssetType.CASH, "EUR", 50_500)
 
     private val accountId = 10L
     private val accountUuid = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc")
     private val holdId = 7L
 
     private fun anAccount() {
-        whenever(accountRepository.ensureUserAccount(user, AssetType.CASH, Currency.EUR))
+        whenever(accountRepository.ensureAccount(AccountType.USER, AssetType.CASH, "EUR", user))
             .thenReturn(AccountIdentifier(accountId, accountUuid))
     }
 
@@ -174,5 +174,19 @@ class HoldServiceTest : BaseUnitTest() {
 
         assertTrue(error.message!!.contains(reference.toString()))
         verifyNoInteractions(accountRepository)
+    }
+
+    @Test
+    fun `a hold on shares reserves on the user's position account for that instrument`() {
+        val positionAccountId = 30L
+        whenever(accountRepository.ensureAccount(AccountType.USER, AssetType.POSITION, "ACME", user))
+            .thenReturn(AccountIdentifier(positionAccountId, UUID.randomUUID()))
+        whenever(holdRepository.insert(any(), eq(positionAccountId), eq(reference), eq(6L))).thenReturn(holdId)
+        whenever(accountRepository.reserve(positionAccountId, 6)).thenReturn(1)
+
+        val receipt = service.hold(HoldCommand(reference, user, AssetType.POSITION, "ACME", 6))
+
+        assertFalse(receipt.replayed)
+        verify(accountRepository).reserve(positionAccountId, 6)
     }
 }

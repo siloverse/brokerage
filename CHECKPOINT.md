@@ -743,3 +743,52 @@ Mentioned, not added: the sell side (a hold on shares, the fill in the other dir
 limit, the ledger does not).
 
 Next: piece 3b, the sell side; then the fill the hold cannot cover.
+
+## 2026-11-24 — 1.3 Holds, piece 3b: the sell side
+
+A sell is the buy turned around: the hold is on shares, and the fill brings money in.
+
+- **A hold can sit on any asset.** `HoldCommand` names `assetType` and `assetCode` instead of
+  a currency. For cash the code must be a known currency, so a typo cannot create a new cash
+  account. `reserve` and `release` needed no change: `available >= :amount` means "enough
+  free shares" on a position account.
+- **The ledger reads the side from the hold.** A hold on a cash account is a buy, a hold on
+  a position account is a sell. No `side` field: the caller sends nothing the ledger already
+  knows, so the two cannot disagree.
+- **The currency must be sent now.** In a buy the hold's account said which currency; in a
+  sell the hold is on shares and nothing does. `FillCommand` carries `currency`.
+- **The command is checked against the hold** before anything is written: a buy must name
+  the hold's currency, a sell must name the hold's instrument. A mismatch is a 400; it means
+  the fill was sent to the wrong order.
+- **The sell fill, six entries:** user position −4 / venue position +4 (the shares), venue
+  settlement cash −20,000 / user cash +20,000 (the price), user cash −200 / fee income +200
+  (the fee, out of the proceeds). The hold is consumed by the number of shares, not by the
+  money. The user's shares leave `booked` and `reserved` together; the cash is a plain
+  credit of the price minus the fee.
+- **The fee must be smaller than the price**, a rule of the command. Otherwise a sell could
+  leave the user owing money.
+- **One `fill`, two bookings.** Finding the hold, the checks, the transfer insert and the
+  replay answer exist once; `bookBuy` and `bookSell` start at "consume the hold". The
+  entries and balance updates stay two methods: they are mirror images, not copies.
+
+Two mistakes worth remembering. The first sell consumed the hold by the money amount, so a
+hold of 6 shares could never cover "20,000". And it used the hold's asset code as the
+currency of the cash accounts, which in a sell is the instrument: euros would have been
+booked on a cash account called ACME. A test now states that no cash account ever gets an
+instrument as its code.
+
+Tests: ten sells of one share on a hold of three at the same moment book exactly three.
+Five buys and five sells for one user in one instrument at the same moment all succeed with
+no deadlock and exact books. One user sells while another buys the same instrument, twenty
+fills at once, and the venue's position ends exact.
+
+Still the known gap, now on both sides: a fill the hold cannot cover is refused with 409.
+Decided for the next piece: a confirmed fill is always booked, funded in this order — what
+is left in the hold, then the user's free balance, then a `CUSTOMER_RECEIVABLE` account for
+the rest (user-bound, zero or negative: the user owes the broker). User accounts never go
+below zero. A released hold is never reopened. `SUSPENSE` stays for items we cannot
+explain, never for a known debt. One new account type, no new tables, no transfer state.
+Getting the money back (repayment, selling the position, write-off) is described then and
+built later.
+
+Next: the fill the hold cannot cover, for buy and sell together.
