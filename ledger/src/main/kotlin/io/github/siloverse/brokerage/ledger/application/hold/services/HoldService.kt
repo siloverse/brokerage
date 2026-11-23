@@ -5,6 +5,7 @@ import io.github.siloverse.brokerage.ledger.application.hold.model.HoldCommand
 import io.github.siloverse.brokerage.ledger.application.hold.model.HoldReceipt
 import io.github.siloverse.brokerage.ledger.application.hold.model.HoldReleaseReceipt
 import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AccountType
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
 import io.github.siloverse.brokerage.ledger.domain.hold.repositories.HoldRepository
@@ -21,10 +22,11 @@ class HoldService(
 
     @Transactional(transactionManager = "ledgerTransactionManager")
     fun hold(holdCommand: HoldCommand): HoldReceipt {
-        val accountIdentifier = accountRepository.ensureUserAccount(
-            userUuid = holdCommand.userUuid,
-            assetType = AssetType.CASH,
-            currency = holdCommand.currency
+        val accountIdentifier = accountRepository.ensureAccount(
+            accountType = AccountType.USER,
+            assetType = holdCommand.assetType,
+            assetCode = holdCommand.assetCode,
+            userUuid = holdCommand.userUuid
         )
 
         val holdUuid = UuidV7.next()

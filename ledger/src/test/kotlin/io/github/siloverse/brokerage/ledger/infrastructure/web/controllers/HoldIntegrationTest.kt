@@ -21,7 +21,7 @@ class HoldIntegrationTest : BaseIntegrationTest() {
         return mvc.perform(
             post("/api/ledger/holds")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("""{$referenceField"userUuid":"$user","currency":"EUR","amount":$amount}""")
+                .content("""{$referenceField"userUuid":"$user","assetType":"CASH","assetCode":"EUR","amount":$amount}""")
         ).andReturn()
     }
 

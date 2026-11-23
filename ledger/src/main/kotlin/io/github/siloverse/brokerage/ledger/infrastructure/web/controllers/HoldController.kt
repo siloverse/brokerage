@@ -26,7 +26,8 @@ class HoldController(private val holdService: HoldService) {
             HoldCommand(
                 reference = request.reference,
                 userUuid = request.userUuid,
-                currency = request.currency,
+                assetType = request.assetType,
+                assetCode = request.assetCode,
                 amount = request.amount,
             )
         )

@@ -39,7 +39,7 @@ class HoldReleaseIntegrationTest : BaseIntegrationTest() {
         val result = mvc.perform(
             post("/api/ledger/holds")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"reference":"$reference","userUuid":"$user","currency":"EUR","amount":$amount}""")
+                .content("""{"reference":"$reference","userUuid":"$user","assetType":"CASH","assetCode":"EUR","amount":$amount}""")
         ).andReturn()
         assertEquals(201, result.response.status)
         return reference
@@ -51,7 +51,7 @@ class HoldReleaseIntegrationTest : BaseIntegrationTest() {
             post("/api/ledger/fills")
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"reference":"$reference","assetCode":"ACME","quantity":1,"amount":${total - 100},"fee":100}""")
+                .content("""{"reference":"$reference","assetCode":"ACME","currency":"EUR","quantity":1,"amount":${total - 100},"fee":100}""")
         ).andReturn()
         assertEquals(201, result.response.status)
     }
@@ -222,7 +222,7 @@ class HoldReleaseIntegrationTest : BaseIntegrationTest() {
                     mvc.perform(
                         post("/api/ledger/holds")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content("""{"reference":"${UUID.randomUUID()}","userUuid":"$user","currency":"EUR","amount":10000}""")
+                            .content("""{"reference":"${UUID.randomUUID()}","userUuid":"$user","assetType":"CASH","assetCode":"EUR","amount":10000}""")
                     ).andReturn().response.status
                 }
             }
