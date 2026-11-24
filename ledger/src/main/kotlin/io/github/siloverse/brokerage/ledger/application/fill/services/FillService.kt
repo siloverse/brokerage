@@ -1,19 +1,20 @@
 package io.github.siloverse.brokerage.ledger.application.fill.services
 
 import io.github.siloverse.brokerage.ledger.application.fill.exception.HoldFillException
-import io.github.siloverse.brokerage.ledger.application.fill.model.FillCommand
+import io.github.siloverse.brokerage.ledger.application.fill.model.FillInstruction
 import io.github.siloverse.brokerage.ledger.application.fill.model.FillReceipt
 import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
-import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
+import io.github.siloverse.brokerage.ledger.domain.account.command.AddToBookedCommand
+import io.github.siloverse.brokerage.ledger.domain.account.command.RemoveFromBookedCommand
+import io.github.siloverse.brokerage.ledger.domain.account.command.SettleReservedCommand
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AccountType
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
-import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
 import io.github.siloverse.brokerage.ledger.domain.hold.model.UserHold
 import io.github.siloverse.brokerage.ledger.domain.hold.repositories.HoldRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
-import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.LedgerEntryRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.TransferRepository
+import io.github.siloverse.brokerage.ledger.domain.transfer.services.TransferInvoker
 import io.github.siloverse.identifiers.core.UuidV7
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -23,32 +24,32 @@ class FillService(
     private val holdRepository: HoldRepository,
     private val transferRepository: TransferRepository,
     private val accountRepository: AccountRepository,
-    private val ledgerEntryRepository: LedgerEntryRepository
+    private val transferInvoker: TransferInvoker
 ) {
     @Transactional(transactionManager = "ledgerTransactionManager")
-    fun fill(fillCommand: FillCommand): FillReceipt {
-        val userHold = holdRepository.findUserHoldByReference(fillCommand.reference) ?: throw HoldNotFoundException(
-            reference = fillCommand.reference
+    fun fill(fillInstruction: FillInstruction): FillReceipt {
+        val userHold = holdRepository.findUserHoldByReference(fillInstruction.reference) ?: throw HoldNotFoundException(
+            reference = fillInstruction.reference
         )
         when (userHold.assetType) {
-            AssetType.CASH -> require(userHold.assetCode == fillCommand.currency.name) { "the hold is in another currency" }
-            AssetType.POSITION -> require(userHold.assetCode == fillCommand.assetCode) { "the hold is on another instrument" }
+            AssetType.CASH -> require(userHold.assetCode == fillInstruction.currency.name) { "the hold is in another currency" }
+            AssetType.POSITION -> require(userHold.assetCode == fillInstruction.assetCode) { "the hold is on another instrument" }
         }
 
         val transferUuid = UuidV7.next()
         val transferId = transferRepository.insert(
             uuid = transferUuid,
             kind = TransferKind.FILL,
-            idempotencyKey = fillCommand.executionUuid,
+            idempotencyKey = fillInstruction.executionUuid,
             holdId = userHold.holdId
         ) ?: return FillReceipt(
-            transferUuid = transferRepository.findUuidByKey(fillCommand.executionUuid),
+            transferUuid = transferRepository.findUuidByKey(fillInstruction.executionUuid),
             replayed = true
         )
 
         when (userHold.assetType) {
-            AssetType.CASH -> bookBuy(fillCommand, userHold, transferId)
-            AssetType.POSITION -> bookSell(fillCommand, userHold, transferId)
+            AssetType.CASH -> bookBuy(fillInstruction, userHold, transferId)
+            AssetType.POSITION -> bookSell(fillInstruction, userHold, transferId)
         }
 
         return FillReceipt(
@@ -57,26 +58,26 @@ class FillService(
         )
     }
 
-    private fun bookBuy(fillCommand: FillCommand, userHold: UserHold, transferId: Long) {
+    private fun bookBuy(fillInstruction: FillInstruction, userHold: UserHold, transferId: Long) {
         val updates = holdRepository.consumeHold(
             id = userHold.holdId,
-            amount = fillCommand.amount + fillCommand.fee
+            amount = fillInstruction.amount + fillInstruction.fee
         )
 
         if (updates == 0) {
             throw HoldFillException(
                 message = "Unable to consume the Hold to fill position as too low consumable hold amount is left",
                 holdUuid = userHold.holdUuid,
-                executionUuid = fillCommand.executionUuid,
-                reference = fillCommand.reference,
-                amount = fillCommand.amount + fillCommand.fee
+                executionUuid = fillInstruction.executionUuid,
+                reference = fillInstruction.reference,
+                amount = fillInstruction.amount + fillInstruction.fee
             )
         }
 
         val userPositionAccountIdentifier = accountRepository.ensureAccount(
             accountType = AccountType.USER,
             assetType = AssetType.POSITION,
-            assetCode = fillCommand.assetCode,
+            assetCode = fillInstruction.assetCode,
             userUuid = userHold.userUuid
         )
 
@@ -87,10 +88,10 @@ class FillService(
             userUuid = userHold.userUuid
         )
 
-        val settlementPositionAccountIdentifier = accountRepository.ensureAccount(
+        val venuePositionAccountIdentifier = accountRepository.ensureAccount(
             accountType = AccountType.VENUE_SETTLEMENT,
             assetType = AssetType.POSITION,
-            assetCode = fillCommand.assetCode,
+            assetCode = fillInstruction.assetCode,
         )
 
         val settlementCashAccountIdentifier = accountRepository.ensureAccount(
@@ -105,199 +106,77 @@ class FillService(
             assetCode = userHold.assetCode,
         )
 
-        ledgerEntryRepository.insert(
-            transferId = transferId,
-            accountId = userCashAccountIdentifier.id,
-            amount = -fillCommand.amount
-        )
-
-        if (fillCommand.fee != 0L) {
-
-            ledgerEntryRepository.insert(
-                transferId = transferId,
-                accountId = feeIncomeAccountIdentifier.id,
-                amount = fillCommand.fee
-            )
-
-            ledgerEntryRepository.insert(
-                transferId = transferId,
-                accountId = userCashAccountIdentifier.id,
-                amount = -fillCommand.fee
-            )
-        }
-
-        ledgerEntryRepository.insert(
-            transferId = transferId,
-            accountId = settlementCashAccountIdentifier.id,
-            amount = fillCommand.amount
-        )
-
-        ledgerEntryRepository.insert(
-            transferId = transferId,
-            accountId = userPositionAccountIdentifier.id,
-            amount = fillCommand.quantity
-        )
-
-        ledgerEntryRepository.insert(
-            transferId = transferId,
-            accountId = settlementPositionAccountIdentifier.id,
-            amount = -fillCommand.quantity
-        )
-
-        updateAccountsForBuyFill(
-            userPositionAccountIdentifier = userPositionAccountIdentifier,
-            userCashAccountIdentifier = userCashAccountIdentifier,
-            settlementPositionAccountIdentifier = settlementPositionAccountIdentifier,
-            settlementCashAccountIdentifier = settlementCashAccountIdentifier,
-            feeIncomeAccountIdentifier = feeIncomeAccountIdentifier,
-            fillCommand = fillCommand
-        )
-    }
-
-    private fun updateAccountsForBuyFill(
-        userPositionAccountIdentifier: AccountIdentifier,
-        userCashAccountIdentifier: AccountIdentifier,
-        settlementPositionAccountIdentifier: AccountIdentifier,
-        settlementCashAccountIdentifier: AccountIdentifier,
-        feeIncomeAccountIdentifier: AccountIdentifier,
-        fillCommand: FillCommand
-    ) {
-        listOf(
-            userPositionAccountIdentifier to fillCommand.quantity,
-            userCashAccountIdentifier to fillCommand.amount + fillCommand.fee,
-            settlementPositionAccountIdentifier to fillCommand.quantity,
-            settlementCashAccountIdentifier to fillCommand.amount,
-            feeIncomeAccountIdentifier to fillCommand.fee
-        )
-            .sortedBy { (account, _) -> account.id }
-            .forEach { (account, amount) ->
-                when (account.id) {
-                    userCashAccountIdentifier.id -> accountRepository.settleReserved(account.id, amount)
-                    settlementPositionAccountIdentifier.id -> accountRepository.removeFromBooked(account.id, amount)
-                    else -> accountRepository.addToBooked(account.id, amount)
-                }
+        val commands = buildList {
+            add(SettleReservedCommand(accountRepository, userCashAccountIdentifier.id, fillInstruction.amount))
+            add(AddToBookedCommand(accountRepository, settlementCashAccountIdentifier.id, fillInstruction.amount))
+            add(RemoveFromBookedCommand(accountRepository, venuePositionAccountIdentifier.id, fillInstruction.quantity))
+            add(AddToBookedCommand(accountRepository, userPositionAccountIdentifier.id, fillInstruction.quantity))
+            if (fillInstruction.fee != 0L) {
+                add(SettleReservedCommand(accountRepository, userCashAccountIdentifier.id, fillInstruction.fee))
+                add(AddToBookedCommand(accountRepository, feeIncomeAccountIdentifier.id, fillInstruction.fee))
             }
+        }
+        transferInvoker.invoke(transferId, commands)
     }
 
-    private fun bookSell(fillCommand: FillCommand, userHold: UserHold, transferId: Long) {
+    private fun bookSell(fillInstruction: FillInstruction, userHold: UserHold, transferId: Long) {
         val updates = holdRepository.consumeHold(
             id = userHold.holdId,
-            amount = fillCommand.quantity
+            amount = fillInstruction.quantity
         )
 
         if (updates == 0) {
             throw HoldFillException(
                 message = "Unable to consume the Hold to sell shares position as too low consumable hold shares are left",
                 holdUuid = userHold.holdUuid,
-                executionUuid = fillCommand.executionUuid,
-                reference = fillCommand.reference,
-                amount = fillCommand.quantity
+                executionUuid = fillInstruction.executionUuid,
+                reference = fillInstruction.reference,
+                amount = fillInstruction.quantity
             )
         }
 
         val userPositionAccountIdentifier = accountRepository.ensureAccount(
             accountType = AccountType.USER,
             assetType = AssetType.POSITION,
-            assetCode = fillCommand.assetCode,
+            assetCode = fillInstruction.assetCode,
             userUuid = userHold.userUuid
         )
 
         val userCashAccountIdentifier = accountRepository.ensureAccount(
             accountType = AccountType.USER,
             assetType = AssetType.CASH,
-            assetCode = fillCommand.currency.name,
+            assetCode = fillInstruction.currency.name,
             userUuid = userHold.userUuid
         )
 
-        val settlementPositionAccountIdentifier = accountRepository.ensureAccount(
+        val venuePositionAccountIdentifier = accountRepository.ensureAccount(
             accountType = AccountType.VENUE_SETTLEMENT,
             assetType = AssetType.POSITION,
-            assetCode = fillCommand.assetCode,
+            assetCode = fillInstruction.assetCode,
         )
 
         val settlementCashAccountIdentifier = accountRepository.ensureAccount(
             accountType = AccountType.VENUE_SETTLEMENT,
             assetType = AssetType.CASH,
-            assetCode = fillCommand.currency.name,
+            assetCode = fillInstruction.currency.name,
         )
 
         val feeIncomeAccountIdentifier = accountRepository.ensureAccount(
             accountType = AccountType.FEE_INCOME,
             assetType = AssetType.CASH,
-            assetCode = fillCommand.currency.name,
+            assetCode = fillInstruction.currency.name,
         )
 
-        ledgerEntryRepository.insert(
-            transferId = transferId,
-            accountId = userCashAccountIdentifier.id,
-            amount = fillCommand.amount
-        )
-
-        if (fillCommand.fee != 0L) {
-
-            ledgerEntryRepository.insert(
-                transferId = transferId,
-                accountId = feeIncomeAccountIdentifier.id,
-                amount = fillCommand.fee
-            )
-
-            ledgerEntryRepository.insert(
-                transferId = transferId,
-                accountId = userCashAccountIdentifier.id,
-                amount = -fillCommand.fee
-            )
-        }
-
-        ledgerEntryRepository.insert(
-            transferId = transferId,
-            accountId = settlementCashAccountIdentifier.id,
-            amount = -fillCommand.amount
-        )
-
-        ledgerEntryRepository.insert(
-            transferId = transferId,
-            accountId = userPositionAccountIdentifier.id,
-            amount = -fillCommand.quantity
-        )
-
-        ledgerEntryRepository.insert(
-            transferId = transferId,
-            accountId = settlementPositionAccountIdentifier.id,
-            amount = +fillCommand.quantity
-        )
-
-        updateAccountsForSellFill(
-            userPositionAccountIdentifier = userPositionAccountIdentifier,
-            userCashAccountIdentifier = userCashAccountIdentifier,
-            settlementPositionAccountIdentifier = settlementPositionAccountIdentifier,
-            settlementCashAccountIdentifier = settlementCashAccountIdentifier,
-            feeIncomeAccountIdentifier = feeIncomeAccountIdentifier,
-            fillCommand = fillCommand
-        )
-    }
-
-    private fun updateAccountsForSellFill(
-        userPositionAccountIdentifier: AccountIdentifier,
-        userCashAccountIdentifier: AccountIdentifier,
-        settlementPositionAccountIdentifier: AccountIdentifier,
-        settlementCashAccountIdentifier: AccountIdentifier,
-        feeIncomeAccountIdentifier: AccountIdentifier,
-        fillCommand: FillCommand
-    ) {
-        listOf(
-            userPositionAccountIdentifier to fillCommand.quantity,
-            userCashAccountIdentifier to fillCommand.amount - fillCommand.fee,
-            settlementPositionAccountIdentifier to fillCommand.quantity,
-            settlementCashAccountIdentifier to fillCommand.amount,
-            feeIncomeAccountIdentifier to fillCommand.fee
-        )
-            .sortedBy { (account, _) -> account.id }
-            .forEach { (account, amount) ->
-                when (account.id) {
-                    userPositionAccountIdentifier.id -> accountRepository.settleReserved(account.id, amount)
-                    settlementCashAccountIdentifier.id -> accountRepository.removeFromBooked(account.id, amount)
-                    else -> accountRepository.addToBooked(account.id, amount)
-                }
+        val commands = buildList {
+            add(SettleReservedCommand(accountRepository, userPositionAccountIdentifier.id, fillInstruction.quantity))
+            add(AddToBookedCommand(accountRepository, venuePositionAccountIdentifier.id, fillInstruction.quantity))
+            add(RemoveFromBookedCommand(accountRepository, settlementCashAccountIdentifier.id, fillInstruction.amount))
+            add(AddToBookedCommand(accountRepository, userCashAccountIdentifier.id, fillInstruction.amount))
+            if (fillInstruction.fee != 0L) {
+                add(RemoveFromBookedCommand(accountRepository, userCashAccountIdentifier.id, fillInstruction.fee))
+                add(AddToBookedCommand(accountRepository, feeIncomeAccountIdentifier.id, fillInstruction.fee))
             }
+        }
+        transferInvoker.invoke(transferId, commands)
     }
 }

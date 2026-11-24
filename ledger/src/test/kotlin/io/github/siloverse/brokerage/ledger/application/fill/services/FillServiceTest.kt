@@ -2,7 +2,7 @@ package io.github.siloverse.brokerage.ledger.application.fill.services
 
 import io.github.siloverse.brokerage.ledger.BaseUnitTest
 import io.github.siloverse.brokerage.ledger.application.fill.exception.HoldFillException
-import io.github.siloverse.brokerage.ledger.application.fill.model.FillCommand
+import io.github.siloverse.brokerage.ledger.application.fill.model.FillInstruction
 import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AccountType
@@ -14,12 +14,13 @@ import io.github.siloverse.brokerage.ledger.domain.hold.repositories.HoldReposit
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.LedgerEntryRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.TransferRepository
+import io.github.siloverse.brokerage.ledger.domain.transfer.services.TransferInvoker
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
-import org.mockito.InjectMocks
 import org.mockito.Mock
 import org.mockito.kotlin.any
 import org.mockito.kotlin.argumentCaptor
@@ -46,14 +47,18 @@ class FillServiceTest : BaseUnitTest() {
     @Mock
     lateinit var ledgerEntryRepository: LedgerEntryRepository
 
-    @InjectMocks
     lateinit var service: FillService
+
+    @BeforeEach
+    fun createTheServiceWithARealInvoker() {
+        service = FillService(holdRepository, transferRepository, accountRepository, TransferInvoker(ledgerEntryRepository))
+    }
 
     private val user = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val reference = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
     private val execution = UUID.fromString("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
     private val holdUuid = UUID.fromString("dddddddd-dddd-dddd-dddd-dddddddddddd")
-    private val command = FillCommand(execution, reference, "ACME", quantity = 4, currency = Currency.EUR, amount = 20_000, fee = 200)
+    private val instruction = FillInstruction(execution, reference, "ACME", quantity = 4, currency = Currency.EUR, amount = 20_000, fee = 200)
 
     private val holdId = 7L
     private val transferId = 1L
@@ -93,7 +98,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a fill writes six entries, the price, the fee and the shares each as a pair that sums to zero`() {
         aFillThatFits()
 
-        service.fill(command)
+        service.fill(instruction)
 
         verify(ledgerEntryRepository).insert(transferId, userCash, -20_000)
         verify(ledgerEntryRepository).insert(transferId, settlementCash, 20_000)
@@ -108,9 +113,10 @@ class FillServiceTest : BaseUnitTest() {
     fun `a fill moves each balance by the sum of that account's entries`() {
         aFillThatFits()
 
-        service.fill(command)
+        service.fill(instruction)
 
-        verify(accountRepository).settleReserved(userCash, 20_200)
+        verify(accountRepository).settleReserved(userCash, 20_000)
+        verify(accountRepository).settleReserved(userCash, 200)
         verify(accountRepository).addToBooked(settlementCash, 20_000)
         verify(accountRepository).addToBooked(feeIncome, 200)
         verify(accountRepository).removeFromBooked(venuePosition, 4)
@@ -121,7 +127,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `the user's cash leaves through the reservation, never through a plain balance change`() {
         aFillThatFits()
 
-        service.fill(command)
+        service.fill(instruction)
 
         verify(accountRepository, never()).addToBooked(eq(userCash), any())
         verify(accountRepository, never()).removeFromBooked(eq(userCash), any())
@@ -132,7 +138,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `the hold is consumed by the price plus the fee`() {
         aFillThatFits()
 
-        service.fill(command)
+        service.fill(instruction)
 
         verify(holdRepository).consumeHold(holdId, 20_200)
     }
@@ -141,7 +147,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `the transfer carries the hold and its uuid is returned`() {
         aFillThatFits()
 
-        val receipt = service.fill(command)
+        val receipt = service.fill(instruction)
 
         val writtenUuid = argumentCaptor<UUID>()
         verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.FILL), eq(execution), eq(holdId))
@@ -153,7 +159,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a fee of zero writes no fee entries`() {
         aFillThatFits(total = 20_000)
 
-        service.fill(command.copy(fee = 0))
+        service.fill(instruction.copy(fee = 0))
 
         verify(ledgerEntryRepository).insert(transferId, userCash, -20_000)
         verify(ledgerEntryRepository).insert(transferId, settlementCash, 20_000)
@@ -167,12 +173,13 @@ class FillServiceTest : BaseUnitTest() {
     fun `the hold is consumed before any account, and the accounts change in ascending id order`() {
         aFillThatFits()
 
-        service.fill(command)
+        service.fill(instruction)
 
         val order = inOrder(transferRepository, holdRepository, accountRepository)
         order.verify(transferRepository).insert(any(), any(), any(), any())
         order.verify(holdRepository).consumeHold(holdId, 20_200)
-        order.verify(accountRepository).settleReserved(userCash, 20_200)
+        order.verify(accountRepository).settleReserved(userCash, 20_000)
+        order.verify(accountRepository).settleReserved(userCash, 200)
         order.verify(accountRepository).addToBooked(settlementCash, 20_000)
         order.verify(accountRepository).addToBooked(userPosition, 4)
         order.verify(accountRepository).removeFromBooked(venuePosition, 4)
@@ -184,7 +191,7 @@ class FillServiceTest : BaseUnitTest() {
         aNewExecution()
         whenever(holdRepository.consumeHold(holdId, 20_200)).thenReturn(0)
 
-        val error = assertThrows<HoldFillException> { service.fill(command) }
+        val error = assertThrows<HoldFillException> { service.fill(instruction) }
 
         assertTrue(error.message!!.contains(holdUuid.toString()))
         assertTrue(error.message!!.contains(reference.toString()))
@@ -196,7 +203,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `an unknown reference is refused before anything is written`() {
         whenever(holdRepository.findUserHoldByReference(reference)).thenReturn(null)
 
-        val error = assertThrows<HoldNotFoundException> { service.fill(command) }
+        val error = assertThrows<HoldNotFoundException> { service.fill(instruction) }
 
         assertTrue(error.message!!.contains(reference.toString()))
         verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
@@ -209,7 +216,7 @@ class FillServiceTest : BaseUnitTest() {
         whenever(transferRepository.insert(any(), eq(TransferKind.FILL), eq(execution), eq(holdId))).thenReturn(null)
         whenever(transferRepository.findUuidByKey(execution)).thenReturn(firstTransferUuid)
 
-        val receipt = service.fill(command)
+        val receipt = service.fill(instruction)
 
         assertTrue(receipt.replayed)
         assertEquals(firstTransferUuid, receipt.transferUuid)
@@ -233,7 +240,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a sell writes six entries, the shares out, the price in, and the fee out of the proceeds`() {
         aSellThatFits()
 
-        service.fill(command)
+        service.fill(instruction)
 
         verify(ledgerEntryRepository).insert(transferId, userPosition, -4)
         verify(ledgerEntryRepository).insert(transferId, venuePosition, 4)
@@ -248,12 +255,13 @@ class FillServiceTest : BaseUnitTest() {
     fun `a sell moves each balance by the sum of that account's entries`() {
         aSellThatFits()
 
-        service.fill(command)
+        service.fill(instruction)
 
         verify(accountRepository).settleReserved(userPosition, 4)
         verify(accountRepository).addToBooked(venuePosition, 4)
         verify(accountRepository).removeFromBooked(settlementCash, 20_000)
-        verify(accountRepository).addToBooked(userCash, 19_800)
+        verify(accountRepository).addToBooked(userCash, 20_000)
+        verify(accountRepository).removeFromBooked(userCash, 200)
         verify(accountRepository).addToBooked(feeIncome, 200)
     }
 
@@ -261,7 +269,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a sell consumes the hold by the number of shares, not by the money`() {
         aSellThatFits()
 
-        service.fill(command)
+        service.fill(instruction)
 
         verify(holdRepository).consumeHold(holdId, 4)
     }
@@ -270,7 +278,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `in a sell the shares leave through the reservation and the cash is never reserved`() {
         aSellThatFits()
 
-        service.fill(command)
+        service.fill(instruction)
 
         verify(accountRepository, never()).settleReserved(eq(userCash), any())
         verify(accountRepository, never()).removeFromBooked(eq(userPosition), any())
@@ -281,12 +289,13 @@ class FillServiceTest : BaseUnitTest() {
     fun `a sell consumes the hold before any account, and the accounts change in ascending id order`() {
         aSellThatFits()
 
-        service.fill(command)
+        service.fill(instruction)
 
         val order = inOrder(transferRepository, holdRepository, accountRepository)
         order.verify(transferRepository).insert(any(), any(), any(), any())
         order.verify(holdRepository).consumeHold(holdId, 4)
-        order.verify(accountRepository).addToBooked(userCash, 19_800)
+        order.verify(accountRepository).addToBooked(userCash, 20_000)
+        order.verify(accountRepository).removeFromBooked(userCash, 200)
         order.verify(accountRepository).removeFromBooked(settlementCash, 20_000)
         order.verify(accountRepository).settleReserved(userPosition, 4)
         order.verify(accountRepository).addToBooked(venuePosition, 4)
@@ -299,7 +308,7 @@ class FillServiceTest : BaseUnitTest() {
         whenever(transferRepository.insert(any(), eq(TransferKind.FILL), eq(execution), eq(holdId))).thenReturn(transferId)
         whenever(holdRepository.consumeHold(holdId, 4)).thenReturn(0)
 
-        assertThrows<HoldFillException> { service.fill(command) }
+        assertThrows<HoldFillException> { service.fill(instruction) }
 
         verifyNoInteractions(accountRepository, ledgerEntryRepository)
     }
@@ -308,7 +317,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a fill for another instrument than the share hold is refused before anything is written`() {
         aSellHold(instrument = "OTHER")
 
-        assertThrows<IllegalArgumentException> { service.fill(command) }
+        assertThrows<IllegalArgumentException> { service.fill(instruction) }
 
         verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
     }
@@ -318,7 +327,7 @@ class FillServiceTest : BaseUnitTest() {
         whenever(holdRepository.findUserHoldByReference(reference))
             .thenReturn(UserHold(holdId, holdUuid, userCash, user, "USD", AssetType.CASH))
 
-        assertThrows<IllegalArgumentException> { service.fill(command) }
+        assertThrows<IllegalArgumentException> { service.fill(instruction) }
 
         verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
     }

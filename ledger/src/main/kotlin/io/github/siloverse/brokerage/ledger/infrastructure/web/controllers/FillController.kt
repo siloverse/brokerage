@@ -1,7 +1,7 @@
 package io.github.siloverse.brokerage.ledger.infrastructure.web.controllers
 
 import io.github.siloverse.brokerage.ledger.application.fill.exception.HoldFillException
-import io.github.siloverse.brokerage.ledger.application.fill.model.FillCommand
+import io.github.siloverse.brokerage.ledger.application.fill.model.FillInstruction
 import io.github.siloverse.brokerage.ledger.application.fill.services.FillService
 import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.FillRequest
@@ -26,7 +26,7 @@ class FillController(private val fillService: FillService) {
         @RequestBody request: FillRequest,
     ): ResponseEntity<FillResponse> {
         val receipt = fillService.fill(
-            FillCommand(
+            FillInstruction(
                 executionUuid = executionUuid,
                 reference = request.reference,
                 assetCode = request.assetCode,

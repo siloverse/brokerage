@@ -4,7 +4,7 @@ import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
 import java.util.UUID
 
-data class HoldCommand(
+data class HoldInstruction(
     val reference: UUID,
     val userUuid: UUID,
     val assetType: AssetType,

@@ -1,7 +1,7 @@
 package io.github.siloverse.brokerage.ledger.application.hold.services
 
 import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
-import io.github.siloverse.brokerage.ledger.application.hold.model.HoldCommand
+import io.github.siloverse.brokerage.ledger.application.hold.model.HoldInstruction
 import io.github.siloverse.brokerage.ledger.application.hold.model.HoldReceipt
 import io.github.siloverse.brokerage.ledger.application.hold.model.HoldReleaseReceipt
 import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
@@ -21,24 +21,24 @@ class HoldService(
 ) {
 
     @Transactional(transactionManager = "ledgerTransactionManager")
-    fun hold(holdCommand: HoldCommand): HoldReceipt {
+    fun hold(holdInstruction: HoldInstruction): HoldReceipt {
         val accountIdentifier = accountRepository.ensureAccount(
             accountType = AccountType.USER,
-            assetType = holdCommand.assetType,
-            assetCode = holdCommand.assetCode,
-            userUuid = holdCommand.userUuid
+            assetType = holdInstruction.assetType,
+            assetCode = holdInstruction.assetCode,
+            userUuid = holdInstruction.userUuid
         )
 
         val holdUuid = UuidV7.next()
         val holdId = holdRepository.insert(
             uuid = holdUuid,
             accountId = accountIdentifier.id,
-            reference = holdCommand.reference,
-            amount = holdCommand.amount
+            reference = holdInstruction.reference,
+            amount = holdInstruction.amount
         )
 
         if (holdId == null) {
-            val existingHoldUuid = holdRepository.getUuidByReference(holdCommand.reference)
+            val existingHoldUuid = holdRepository.getUuidByReference(holdInstruction.reference)
             return HoldReceipt(
                 holdUuid = existingHoldUuid,
                 replayed = true
@@ -47,14 +47,14 @@ class HoldService(
 
         val result = accountRepository.reserve(
             accountId = accountIdentifier.id,
-            amount = holdCommand.amount
+            amount = holdInstruction.amount
         )
 
         if (result == 0) {
             throw InsufficientFundsException(
                 accountUuid = accountIdentifier.uuid,
-                userUuid = holdCommand.userUuid,
-                amount = holdCommand.amount,
+                userUuid = holdInstruction.userUuid,
+                amount = holdInstruction.amount,
             )
         }
 

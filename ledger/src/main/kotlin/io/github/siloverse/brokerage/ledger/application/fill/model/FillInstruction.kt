@@ -3,7 +3,7 @@ package io.github.siloverse.brokerage.ledger.application.fill.model
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
 import java.util.UUID
 
-data class FillCommand(
+data class FillInstruction(
     val executionUuid: UUID,
     val reference: UUID,
     val assetCode: String,
