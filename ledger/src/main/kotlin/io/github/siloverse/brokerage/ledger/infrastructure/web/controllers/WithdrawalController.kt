@@ -24,7 +24,7 @@ class WithdrawalController(private val withdrawalService: WithdrawalService) {
         @RequestHeader("Idempotency-Key") idempotencyKey: UUID,
         @RequestBody request: WithdrawalRequest,
     ): ResponseEntity<WithdrawalResponse> {
-        val receipt = withdrawalService.withdraw(
+        val receipt = withdrawalService.transfer(
             WithdrawalInstruction(
                 idempotencyKey = idempotencyKey,
                 userUuid = request.userUuid,

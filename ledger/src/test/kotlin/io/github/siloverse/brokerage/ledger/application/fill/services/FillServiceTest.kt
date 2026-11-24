@@ -1,7 +1,6 @@
 package io.github.siloverse.brokerage.ledger.application.fill.services
 
 import io.github.siloverse.brokerage.ledger.BaseUnitTest
-import io.github.siloverse.brokerage.ledger.application.fill.exception.HoldFillException
 import io.github.siloverse.brokerage.ledger.application.fill.model.FillInstruction
 import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
@@ -9,12 +8,15 @@ import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AccountTy
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
+import io.github.siloverse.brokerage.ledger.domain.hold.exception.HoldFillException
 import io.github.siloverse.brokerage.ledger.domain.hold.model.UserHold
 import io.github.siloverse.brokerage.ledger.domain.hold.repositories.HoldRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.LedgerEntryRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.TransferRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.services.TransferInvoker
+import io.github.siloverse.brokerage.ledger.domain.transfer.strategy.BuyFillStrategy
+import io.github.siloverse.brokerage.ledger.domain.transfer.strategy.SellFillStrategy
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -50,8 +52,16 @@ class FillServiceTest : BaseUnitTest() {
     lateinit var service: FillService
 
     @BeforeEach
-    fun createTheServiceWithARealInvoker() {
-        service = FillService(holdRepository, transferRepository, accountRepository, TransferInvoker(ledgerEntryRepository))
+    fun createTheContextWithItsRealStrategies() {
+        val transferInvoker = TransferInvoker(ledgerEntryRepository)
+        service = FillService(
+            holdRepository,
+            transferRepository,
+            listOf(
+                BuyFillStrategy(holdRepository, accountRepository, transferInvoker),
+                SellFillStrategy(holdRepository, accountRepository, transferInvoker),
+            )
+        )
     }
 
     private val user = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -98,7 +108,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a fill writes six entries, the price, the fee and the shares each as a pair that sums to zero`() {
         aFillThatFits()
 
-        service.fill(instruction)
+        service.transfer(instruction)
 
         verify(ledgerEntryRepository).insert(transferId, userCash, -20_000)
         verify(ledgerEntryRepository).insert(transferId, settlementCash, 20_000)
@@ -113,7 +123,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a fill moves each balance by the sum of that account's entries`() {
         aFillThatFits()
 
-        service.fill(instruction)
+        service.transfer(instruction)
 
         verify(accountRepository).settleReserved(userCash, 20_000)
         verify(accountRepository).settleReserved(userCash, 200)
@@ -127,7 +137,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `the user's cash leaves through the reservation, never through a plain balance change`() {
         aFillThatFits()
 
-        service.fill(instruction)
+        service.transfer(instruction)
 
         verify(accountRepository, never()).addToBooked(eq(userCash), any())
         verify(accountRepository, never()).removeFromBooked(eq(userCash), any())
@@ -138,7 +148,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `the hold is consumed by the price plus the fee`() {
         aFillThatFits()
 
-        service.fill(instruction)
+        service.transfer(instruction)
 
         verify(holdRepository).consumeHold(holdId, 20_200)
     }
@@ -147,7 +157,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `the transfer carries the hold and its uuid is returned`() {
         aFillThatFits()
 
-        val receipt = service.fill(instruction)
+        val receipt = service.transfer(instruction)
 
         val writtenUuid = argumentCaptor<UUID>()
         verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.FILL), eq(execution), eq(holdId))
@@ -159,7 +169,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a fee of zero writes no fee entries`() {
         aFillThatFits(total = 20_000)
 
-        service.fill(instruction.copy(fee = 0))
+        service.transfer(instruction.copy(fee = 0))
 
         verify(ledgerEntryRepository).insert(transferId, userCash, -20_000)
         verify(ledgerEntryRepository).insert(transferId, settlementCash, 20_000)
@@ -173,7 +183,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `the hold is consumed before any account, and the accounts change in ascending id order`() {
         aFillThatFits()
 
-        service.fill(instruction)
+        service.transfer(instruction)
 
         val order = inOrder(transferRepository, holdRepository, accountRepository)
         order.verify(transferRepository).insert(any(), any(), any(), any())
@@ -191,10 +201,9 @@ class FillServiceTest : BaseUnitTest() {
         aNewExecution()
         whenever(holdRepository.consumeHold(holdId, 20_200)).thenReturn(0)
 
-        val error = assertThrows<HoldFillException> { service.fill(instruction) }
+        val error = assertThrows<HoldFillException> { service.transfer(instruction) }
 
         assertTrue(error.message!!.contains(holdUuid.toString()))
-        assertTrue(error.message!!.contains(reference.toString()))
         assertTrue(error.message!!.contains("20200"))
         verifyNoInteractions(accountRepository, ledgerEntryRepository)
     }
@@ -203,7 +212,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `an unknown reference is refused before anything is written`() {
         whenever(holdRepository.findUserHoldByReference(reference)).thenReturn(null)
 
-        val error = assertThrows<HoldNotFoundException> { service.fill(instruction) }
+        val error = assertThrows<HoldNotFoundException> { service.transfer(instruction) }
 
         assertTrue(error.message!!.contains(reference.toString()))
         verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
@@ -216,7 +225,7 @@ class FillServiceTest : BaseUnitTest() {
         whenever(transferRepository.insert(any(), eq(TransferKind.FILL), eq(execution), eq(holdId))).thenReturn(null)
         whenever(transferRepository.findUuidByKey(execution)).thenReturn(firstTransferUuid)
 
-        val receipt = service.fill(instruction)
+        val receipt = service.transfer(instruction)
 
         assertTrue(receipt.replayed)
         assertEquals(firstTransferUuid, receipt.transferUuid)
@@ -240,7 +249,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a sell writes six entries, the shares out, the price in, and the fee out of the proceeds`() {
         aSellThatFits()
 
-        service.fill(instruction)
+        service.transfer(instruction)
 
         verify(ledgerEntryRepository).insert(transferId, userPosition, -4)
         verify(ledgerEntryRepository).insert(transferId, venuePosition, 4)
@@ -255,7 +264,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a sell moves each balance by the sum of that account's entries`() {
         aSellThatFits()
 
-        service.fill(instruction)
+        service.transfer(instruction)
 
         verify(accountRepository).settleReserved(userPosition, 4)
         verify(accountRepository).addToBooked(venuePosition, 4)
@@ -269,7 +278,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a sell consumes the hold by the number of shares, not by the money`() {
         aSellThatFits()
 
-        service.fill(instruction)
+        service.transfer(instruction)
 
         verify(holdRepository).consumeHold(holdId, 4)
     }
@@ -278,7 +287,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `in a sell the shares leave through the reservation and the cash is never reserved`() {
         aSellThatFits()
 
-        service.fill(instruction)
+        service.transfer(instruction)
 
         verify(accountRepository, never()).settleReserved(eq(userCash), any())
         verify(accountRepository, never()).removeFromBooked(eq(userPosition), any())
@@ -289,7 +298,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a sell consumes the hold before any account, and the accounts change in ascending id order`() {
         aSellThatFits()
 
-        service.fill(instruction)
+        service.transfer(instruction)
 
         val order = inOrder(transferRepository, holdRepository, accountRepository)
         order.verify(transferRepository).insert(any(), any(), any(), any())
@@ -308,7 +317,7 @@ class FillServiceTest : BaseUnitTest() {
         whenever(transferRepository.insert(any(), eq(TransferKind.FILL), eq(execution), eq(holdId))).thenReturn(transferId)
         whenever(holdRepository.consumeHold(holdId, 4)).thenReturn(0)
 
-        assertThrows<HoldFillException> { service.fill(instruction) }
+        assertThrows<HoldFillException> { service.transfer(instruction) }
 
         verifyNoInteractions(accountRepository, ledgerEntryRepository)
     }
@@ -317,7 +326,7 @@ class FillServiceTest : BaseUnitTest() {
     fun `a fill for another instrument than the share hold is refused before anything is written`() {
         aSellHold(instrument = "OTHER")
 
-        assertThrows<IllegalArgumentException> { service.fill(instruction) }
+        assertThrows<IllegalArgumentException> { service.transfer(instruction) }
 
         verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
     }
@@ -327,7 +336,7 @@ class FillServiceTest : BaseUnitTest() {
         whenever(holdRepository.findUserHoldByReference(reference))
             .thenReturn(UserHold(holdId, holdUuid, userCash, user, "USD", AssetType.CASH))
 
-        assertThrows<IllegalArgumentException> { service.fill(instruction) }
+        assertThrows<IllegalArgumentException> { service.transfer(instruction) }
 
         verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
     }

@@ -1,9 +1,9 @@
 package io.github.siloverse.brokerage.ledger.infrastructure.web.controllers
 
-import io.github.siloverse.brokerage.ledger.application.fill.exception.HoldFillException
 import io.github.siloverse.brokerage.ledger.application.fill.model.FillInstruction
 import io.github.siloverse.brokerage.ledger.application.fill.services.FillService
 import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
+import io.github.siloverse.brokerage.ledger.domain.hold.exception.HoldFillException
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.FillRequest
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.FillResponse
 import org.springframework.http.HttpStatus
@@ -25,7 +25,7 @@ class FillController(private val fillService: FillService) {
         @RequestHeader("Idempotency-Key") executionUuid: UUID,
         @RequestBody request: FillRequest,
     ): ResponseEntity<FillResponse> {
-        val receipt = fillService.fill(
+        val receipt = fillService.transfer(
             FillInstruction(
                 executionUuid = executionUuid,
                 reference = request.reference,

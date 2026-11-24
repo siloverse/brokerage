@@ -1,7 +1,7 @@
 package io.github.siloverse.brokerage.ledger.application.withdrawal.services
 
+import io.github.siloverse.brokerage.ledger.application.transfer.services.TransferTemplate
 import io.github.siloverse.brokerage.ledger.application.withdrawal.model.WithdrawalInstruction
-import io.github.siloverse.brokerage.ledger.application.withdrawal.model.WithdrawalReceipt
 import io.github.siloverse.brokerage.ledger.domain.account.command.AddToBookedCommand
 import io.github.siloverse.brokerage.ledger.domain.account.command.TakeFromAvailableCommand
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
@@ -9,44 +9,36 @@ import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountR
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.TransferRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.services.TransferInvoker
-import io.github.siloverse.identifiers.core.UuidV7
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
+import java.util.UUID
 
 @Service
 class WithdrawalService(
-    private val transferRepository: TransferRepository,
+    transferRepository: TransferRepository,
     private val accountRepository: AccountRepository,
     private val transferInvoker: TransferInvoker,
-) {
+) : TransferTemplate<WithdrawalInstruction, Unit>(transferRepository) {
 
-    @Transactional(transactionManager = "ledgerTransactionManager")
-    fun withdraw(withdrawalInstruction: WithdrawalInstruction): WithdrawalReceipt {
+    override val kind: TransferKind = TransferKind.WITHDRAWAL
 
-        val transferUuid = UuidV7.next()
-        val transferId = transferRepository.insert(
-            uuid = transferUuid,
-            kind = TransferKind.WITHDRAWAL,
-            idempotencyKey = withdrawalInstruction.idempotencyKey
-        )
+    override fun idempotencyKey(instruction: WithdrawalInstruction) = instruction.idempotencyKey
 
-        if (transferId == null) {
-            val existingTransferUuid = transferRepository.findUuidByKey(withdrawalInstruction.idempotencyKey)
-            return WithdrawalReceipt(
-                transferUuid = existingTransferUuid,
-                replayed = true
-            )
-        }
+    override fun prepare(instruction: WithdrawalInstruction) = Unit
 
+    override fun book(
+        instruction: WithdrawalInstruction,
+        prepared: Unit,
+        transferId: Long
+    ) {
         val userAccountIdentifier = accountRepository.ensureUserAccount(
-            userUuid = withdrawalInstruction.userUuid,
+            userUuid = instruction.userUuid,
             assetType = AssetType.CASH,
-            currency = withdrawalInstruction.currency
+            currency = instruction.currency
         )
 
         val settlementAccountIdentifier = accountRepository.ensureSettlementAccount(
             assetType = AssetType.CASH,
-            currency = withdrawalInstruction.currency
+            currency = instruction.currency
         )
 
         transferInvoker.invoke(
@@ -55,22 +47,16 @@ class WithdrawalService(
                 TakeFromAvailableCommand(
                     receiver = accountRepository,
                     accountId = userAccountIdentifier.id,
-                    amount = withdrawalInstruction.amount,
+                    amount = instruction.amount,
                     accountUuid = userAccountIdentifier.uuid,
-                    userUuid = withdrawalInstruction.userUuid
+                    userUuid = instruction.userUuid
                 ),
                 AddToBookedCommand(
                     receiver = accountRepository,
                     accountId = settlementAccountIdentifier.id,
-                    amount = withdrawalInstruction.amount
+                    amount = instruction.amount
                 )
             )
         )
-
-        return WithdrawalReceipt(
-            transferUuid = transferUuid,
-            replayed = false
-        )
     }
-
 }

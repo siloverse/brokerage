@@ -53,7 +53,8 @@ When a chapter needs an exception, write it down here first.
   folder names everywhere: `model` (types, instructions, results; enums in `model/enums`),
   `services` (use case services), `exception` (the refusals a use case can throw),
   `repositories` (repository interfaces in `domain`, their implementations in
-  `infrastructure.persistence`), `config`. A role package never sits above a feature:
+  `infrastructure.persistence`), `config`, and, where a design pattern is used, the
+  pattern's own name: `command`, `strategy`. A role package never sits above a feature:
   no `application.services`, no `domain.repositories`. Role names such as `mapper`, `repository`, `controller` are allowed only
   inside `infrastructure`, and only within a feature slice (`infrastructure.web`,
   `infrastructure.persistence`). A feature that passes about a dozen files in one role
@@ -65,6 +66,19 @@ When a chapter needs an exception, write it down here first.
   packs one step for an invoker (`domain.account.command`). The input of a use case is an
   **instruction** (`FillInstruction`); what arrives over HTTP is a **request**
   (`FillRequest`).
+- Design patterns are named with the words of *Design Patterns* (Gamma, Helm, Johnson,
+  Vlissides) and *Head First Design Patterns*, in class names and in conversation. The
+  ledger uses three:
+  - **Command**: `Command` and its concrete commands in `domain.account.command`, with
+    `AccountRepository` as the receiver and `TransferInvoker` as the invoker. The invoker
+    writes one ledger entry per command and executes them in ascending account id.
+  - **Strategy**: `FillStrategy` with `BuyFillStrategy` and `SellFillStrategy` in
+    `domain.transfer.strategy`; `FillService` is the context.
+  - **Template Method**: `TransferTemplate` in `application.transfer.services` is the
+    abstract class; the deposit, withdrawal and fill services are its concrete classes.
+- A domain class carries no Spring annotation. When Spring must manage one, a
+  `@Configuration` class in the `application` layer declares the bean
+  (`application.transfer.config`).
 - Internal domain events stay inside the module. Integration events, the ones other
   modules subscribe to, are declared in `api`.
 
