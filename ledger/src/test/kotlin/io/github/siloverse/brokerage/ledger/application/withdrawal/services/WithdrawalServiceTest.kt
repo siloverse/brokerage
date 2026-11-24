@@ -68,7 +68,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey()
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(1)
 
-        service.withdraw(withdrawalInstruction)
+        service.transfer(withdrawalInstruction)
 
         verify(ledgerEntryRepository).insert(transferId, 10L, -5_000)
         verify(ledgerEntryRepository).insert(transferId, 20L, 5_000)
@@ -82,7 +82,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey()
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(1)
 
-        val receipt = service.withdraw(withdrawalInstruction)
+        val receipt = service.transfer(withdrawalInstruction)
 
         val writtenUuid = argumentCaptor<UUID>()
         verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.WITHDRAWAL), eq(key), isNull())
@@ -95,7 +95,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey()
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(0)
 
-        val error = assertThrows<InsufficientFundsException> { service.withdraw(withdrawalInstruction) }
+        val error = assertThrows<InsufficientFundsException> { service.transfer(withdrawalInstruction) }
 
         assertTrue(error.message!!.contains(user.toString()))
         assertTrue(error.message!!.contains(userAccountUuid.toString()))
@@ -107,7 +107,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey()
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(1)
 
-        service.withdraw(withdrawalInstruction)
+        service.transfer(withdrawalInstruction)
 
         verify(accountRepository, never()).addToBooked(eq(10L), any())
     }
@@ -117,7 +117,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey(userAccountId = 10L, settlementAccountId = 20L)
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(1)
 
-        service.withdraw(withdrawalInstruction)
+        service.transfer(withdrawalInstruction)
 
         val order = inOrder(accountRepository)
         order.verify(accountRepository).takeFromAvailable(10L, 5_000)
@@ -129,7 +129,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         aNewKey(userAccountId = 10L, settlementAccountId = 5L)
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(1)
 
-        service.withdraw(withdrawalInstruction)
+        service.transfer(withdrawalInstruction)
 
         val order = inOrder(accountRepository)
         order.verify(accountRepository).addToBooked(5L, 5_000)
@@ -142,7 +142,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         whenever(transferRepository.insert(any(), eq(TransferKind.WITHDRAWAL), eq(key), isNull())).thenReturn(null)
         whenever(transferRepository.findUuidByKey(key)).thenReturn(firstTransferUuid)
 
-        val receipt = service.withdraw(withdrawalInstruction)
+        val receipt = service.transfer(withdrawalInstruction)
 
         assertTrue(receipt.replayed)
         assertEquals(firstTransferUuid, receipt.transferUuid)

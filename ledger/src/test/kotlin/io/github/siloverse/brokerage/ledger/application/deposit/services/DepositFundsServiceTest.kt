@@ -64,7 +64,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
     fun `a deposit writes two entries that sum to zero and moves both balances`() {
         aNewKey()
 
-        service.deposit(depositInstruction)
+        service.transfer(depositInstruction)
 
         verify(ledgerEntryRepository).insert(transferId, userAccountId, 10_000)
         verify(ledgerEntryRepository).insert(transferId, settlementAccountId, -10_000)
@@ -77,7 +77,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
     fun `a deposit returns the uuid of the transfer it wrote`() {
         aNewKey()
 
-        val receipt = service.deposit(depositInstruction)
+        val receipt = service.transfer(depositInstruction)
 
         val writtenUuid = argumentCaptor<UUID>()
         verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.DEPOSIT), eq(key), isNull())
@@ -89,7 +89,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
     fun `the transfer is written before any entry or balance`() {
         aNewKey()
 
-        service.deposit(depositInstruction)
+        service.transfer(depositInstruction)
 
         val order = inOrder(transferRepository, ledgerEntryRepository, accountRepository)
         order.verify(transferRepository).insert(any(), any(), any(), anyOrNull())
@@ -103,7 +103,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
         whenever(transferRepository.insert(any(), eq(TransferKind.DEPOSIT), eq(key), isNull())).thenReturn(null)
         whenever(transferRepository.findUuidByKey(key)).thenReturn(firstTransferUuid)
 
-        val receipt = service.deposit(depositInstruction)
+        val receipt = service.transfer(depositInstruction)
 
         assertTrue(receipt.replayed)
         assertEquals(firstTransferUuid, receipt.transferUuid)

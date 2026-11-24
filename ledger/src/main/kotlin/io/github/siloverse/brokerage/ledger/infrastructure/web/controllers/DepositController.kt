@@ -23,7 +23,7 @@ class DepositController(private val depositFundsService: DepositFundsService) {
         @RequestHeader("Idempotency-Key") idempotencyKey: UUID,
         @RequestBody request: DepositRequest,
     ): ResponseEntity<DepositResponse> {
-        val receipt = depositFundsService.deposit(
+        val receipt = depositFundsService.transfer(
             DepositInstruction(
                 idempotencyKey = idempotencyKey,
                 userUuid = request.userUuid,

@@ -792,3 +792,63 @@ Getting the money back (repayment, selling the position, write-off) is described
 built later.
 
 Next: the fill the hold cannot cover, for buy and sell together.
+
+## 2026-11-25 — The ledger's services, rebuilt with three design patterns
+
+No change in behaviour. The services had been extended piece by piece (deposit, withdrawal,
+hold, buy fill, sell fill) and most review findings were of one kind: an entry and a balance
+update written separately and disagreeing. The patterns move the repeated mechanics into one
+place each. Names follow *Design Patterns* (GoF) and *Head First Design Patterns*.
+
+- **Command.** One balance change on one account is a `Command` with `execute()`:
+  `AddToBookedCommand`, `RemoveFromBookedCommand`, `SettleReservedCommand`,
+  `TakeFromAvailableCommand`. The receiver is `AccountRepository`. The invoker,
+  `TransferInvoker`, writes one ledger entry per command and executes them in ascending
+  account id. So an entry and its balance change come from the same object and cannot
+  disagree, and the lock order is written once. The services are the clients: a deposit is
+  two commands, a fill is six. GoF's `Unexecute` is left out on purpose: a ledger never
+  undoes, a correction is a new transfer.
+- **Strategy.** `FillStrategy` with `BuyFillStrategy` and `SellFillStrategy`. Each knows
+  which kind of hold it handles, how to check that a fill fits the hold, and how to book it.
+  `FillService` is the context: it takes the strategy for the hold's asset type from a map
+  and never mentions buy or sell.
+- **Template Method.** `TransferTemplate.transfer` is the skeleton every transfer shares:
+  prepare, insert the transfer (the idempotency gate), answer a replay, book, return the
+  receipt. The primitive operations are `kind`, `idempotencyKey`, `prepare` and `book`; the
+  hook is `holdId`. `prepare` is only for what must happen before the gate: the fill finds
+  its hold and validates there; deposit and withdrawal prepare nothing.
+
+Decisions on the way, each one Awais's question:
+
+- **Which layer.** A pattern does not decide the layer; what a class knows does. The
+  commands, the invoker and the strategies hold ledger rules and know only domain types, so
+  they live in the domain, as plain classes. A `@Configuration` class in `application`
+  declares their beans, because the domain carries no Spring. The template holds the
+  transaction, the idempotency gate and the receipt, which are use-case concerns, so it
+  lives in `application`.
+- **Strategy or Template Method.** GoF: Template Method varies part of an algorithm by
+  inheritance, Strategy varies all of it by delegation, and composition is preferred. Buy
+  and sell are two whole ways to book: Strategy. The three transfer kinds share fixed steps
+  and differ in one: Template Method.
+- **One word, one meaning.** `DepositCommand`, `HoldCommand` and the others had no
+  `execute()`; they are the input of a use case. They are now `…Instruction`. Request (HTTP),
+  instruction (use case), command (one executable step).
+- **`Fill` and `FillInstruction`.** `Fill` is the trade that happened (instrument, quantity,
+  currency, amount, fee), a domain type the strategies read. The instruction adds what is
+  about the request: the execution uuid and the reference.
+- **No commands for holds.** A hold touches one account and writes no entry, and its steps
+  depend on each other's results. A command suits a step that is decided up front and
+  returns nothing.
+- **The template method is not final.** The books make it final. Spring adds the
+  transaction by subclassing the service, so the method must stay open; the annotation sits
+  on the abstract class, which also makes the Kotlin plugin open it.
+
+One mistake worth remembering: `RemoveFromBookedCommand` first carried a positive entry
+amount. One small test on that one class named the line.
+
+Mentioned, not added: Chain of Responsibility for the funding order of a fill the hold
+cannot cover (the hold, the free balance, the receivable); Observer for `TransferBooked`
+(task 1.6); the fill instruction holding a `Fill` instead of copying its fields; the amount
+rules moving from the instruction into `Fill`.
+
+Next: the fill the hold cannot cover.
