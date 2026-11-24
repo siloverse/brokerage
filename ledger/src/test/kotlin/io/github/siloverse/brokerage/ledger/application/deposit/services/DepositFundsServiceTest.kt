@@ -1,7 +1,7 @@
 package io.github.siloverse.brokerage.ledger.application.deposit.services
 
 import io.github.siloverse.brokerage.ledger.BaseUnitTest
-import io.github.siloverse.brokerage.ledger.application.deposit.model.DepositCommand
+import io.github.siloverse.brokerage.ledger.application.deposit.model.DepositInstruction
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.Currency
@@ -9,11 +9,12 @@ import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountR
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.LedgerEntryRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.TransferRepository
+import io.github.siloverse.brokerage.ledger.domain.transfer.services.TransferInvoker
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.mockito.InjectMocks
 import org.mockito.Mock
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
@@ -38,12 +39,16 @@ class DepositFundsServiceTest : BaseUnitTest() {
     @Mock
     lateinit var ledgerEntryRepository: LedgerEntryRepository
 
-    @InjectMocks
     lateinit var service: DepositFundsService
+
+    @BeforeEach
+    fun createTheServiceWithARealInvoker() {
+        service = DepositFundsService(transferRepository, accountRepository, TransferInvoker(ledgerEntryRepository))
+    }
 
     private val user = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val key = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-    private val depositCommand = DepositCommand(key, user, Currency.EUR, 10_000)
+    private val depositInstruction = DepositInstruction(key, user, Currency.EUR, 10_000)
 
     private val transferId = 1L
     private val userAccountId = 10L
@@ -59,7 +64,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
     fun `a deposit writes two entries that sum to zero and moves both balances`() {
         aNewKey()
 
-        service.deposit(depositCommand)
+        service.deposit(depositInstruction)
 
         verify(ledgerEntryRepository).insert(transferId, userAccountId, 10_000)
         verify(ledgerEntryRepository).insert(transferId, settlementAccountId, -10_000)
@@ -72,7 +77,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
     fun `a deposit returns the uuid of the transfer it wrote`() {
         aNewKey()
 
-        val receipt = service.deposit(depositCommand)
+        val receipt = service.deposit(depositInstruction)
 
         val writtenUuid = argumentCaptor<UUID>()
         verify(transferRepository).insert(writtenUuid.capture(), eq(TransferKind.DEPOSIT), eq(key), isNull())
@@ -84,7 +89,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
     fun `the transfer is written before any entry or balance`() {
         aNewKey()
 
-        service.deposit(depositCommand)
+        service.deposit(depositInstruction)
 
         val order = inOrder(transferRepository, ledgerEntryRepository, accountRepository)
         order.verify(transferRepository).insert(any(), any(), any(), anyOrNull())
@@ -98,7 +103,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
         whenever(transferRepository.insert(any(), eq(TransferKind.DEPOSIT), eq(key), isNull())).thenReturn(null)
         whenever(transferRepository.findUuidByKey(key)).thenReturn(firstTransferUuid)
 
-        val receipt = service.deposit(depositCommand)
+        val receipt = service.deposit(depositInstruction)
 
         assertTrue(receipt.replayed)
         assertEquals(firstTransferUuid, receipt.transferUuid)

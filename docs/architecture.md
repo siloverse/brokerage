@@ -28,7 +28,7 @@ When a chapter needs an exception, write it down here first.
     build.gradle.kts
     src/main/java/io/github/siloverse/brokerage/<module>/api/package-info.java
     src/main/kotlin/io/github/siloverse/brokerage/<module>/
-        api/              public operations, command contracts, DTOs, published events
+        api/              public operations, instruction contracts, DTOs, published events
         application/      use cases, orchestration, transaction boundaries, outbound ports
         domain/           business models, invariants, domain services, domain interfaces
         infrastructure/   persistence, messaging adapters, HTTP controllers, external clients
@@ -37,7 +37,7 @@ When a chapter needs an exception, write it down here first.
 
 - `api` is what other modules may import. Nothing else in the module is visible to them.
 - `application` owns the use cases, one sub-package each (`ledger.application.deposit`):
-  the command, the result, and the service that runs the steps inside one transaction. It
+  the instruction, the result, and the service that runs the steps inside one transaction. It
   also owns the **outbound ports** to other systems, written in the consumer's words (the
   Venue port lives in `orders.application.venue`). A repository is not such a port: it
   belongs to its aggregate in `domain`.
@@ -50,7 +50,7 @@ When a chapter needs an exception, write it down here first.
 - Inside `application` and `domain`, sub-packages are named after a **concept or use
   case** (`application.deposit`, `domain.account`) first. Feature first, role second:
   **inside** each of those, files are grouped by role from the first file on, with the same
-  folder names everywhere: `model` (types, commands, results; enums in `model/enums`),
+  folder names everywhere: `model` (types, instructions, results; enums in `model/enums`),
   `services` (use case services), `exception` (the refusals a use case can throw),
   `repositories` (repository interfaces in `domain`, their implementations in
   `infrastructure.persistence`), `config`. A role package never sits above a feature:
@@ -61,6 +61,10 @@ When a chapter needs an exception, write it down here first.
   its chapter starts, never ahead of it.
 - These are packages, never Gradle subprojects. A new subproject needs a different
   consumer or a different lifecycle, not a different layer.
+- The word **command** is kept for the Command pattern: an object with `execute()` that
+  packs one step for an invoker (`domain.account.command`). The input of a use case is an
+  **instruction** (`FillInstruction`); what arrives over HTTP is a **request**
+  (`FillRequest`).
 - Internal domain events stay inside the module. Integration events, the ones other
   modules subscribe to, are declared in `api`.
 
@@ -103,11 +107,11 @@ Inbound and outbound describe direction relative to a module. They do not decide
 
 | Contract | Declared by | Where |
 |---|---|---|
-| Public command asking for an action (`HoldFunds`) | the module that handles it | handler's `api` |
+| Public instruction asking for an action (`HoldFunds`) | the module that handles it | handler's `api` |
 | Integration event announcing a fact (`TransferBooked`) | the module that produced the fact | publisher's `api` |
 | Outbound port describing a need (`Venue`) | the module that has the need | consumer's `application` or `domain` |
 
-Commands use imperative names, events use past tense. A subscriber uses the publisher's
+Instructions use imperative names, events use past tense. A subscriber uses the publisher's
 event type; it does not copy it because it is inbound. A consumer may translate an incoming
 contract into its own model. Messages are never pooled into a generic `shared` or
 `messages` project just because several modules use them.
@@ -115,7 +119,7 @@ contract into its own model. Messages are never pooled into a generic `shared` o
 ## 5. Cross-module communication
 
 - A synchronous call to another module's `api` when an immediate result is needed. A
-  command can be a plain Kotlin object handed to a function; no bus, no broker.
+  instruction can be a plain Kotlin object handed to a function; no bus, no broker.
 - An event when decoupling pays for itself (`TradeExecuted` to the ledger). Not for every
   interaction.
 - A direct dependency on a provider's `api` when it is intentional and acyclic.
@@ -123,7 +127,7 @@ contract into its own model. Messages are never pooled into a generic `shared` o
   that implements it. The adapter lives in the consumer's `infrastructure` when that adds
   no unwanted dependency, otherwise in `app`. The adapter translates and delegates; the
   business decision stays in the owning module.
-- Check the compile-time graph. If `orders` imports `ledger`'s commands and `ledger`
+- Check the compile-time graph. If `orders` imports `ledger`'s instructions and `ledger`
   imports `orders`' events, that is a Gradle cycle even if the events are asynchronous.
   Break it with a direction change or an adapter in `app`.
 

@@ -2,7 +2,7 @@ package io.github.siloverse.brokerage.ledger.application.hold.services
 
 import io.github.siloverse.brokerage.ledger.BaseUnitTest
 import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
-import io.github.siloverse.brokerage.ledger.application.hold.model.HoldCommand
+import io.github.siloverse.brokerage.ledger.application.hold.model.HoldInstruction
 import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AccountType
@@ -40,7 +40,7 @@ class HoldServiceTest : BaseUnitTest() {
 
     private val user = UUID.fromString("11111111-1111-1111-1111-111111111111")
     private val reference = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-    private val command = HoldCommand(reference, user, AssetType.CASH, "EUR", 50_500)
+    private val instruction = HoldInstruction(reference, user, AssetType.CASH, "EUR", 50_500)
 
     private val accountId = 10L
     private val accountUuid = UUID.fromString("cccccccc-cccc-cccc-cccc-cccccccccccc")
@@ -61,7 +61,7 @@ class HoldServiceTest : BaseUnitTest() {
         aNewReference()
         whenever(accountRepository.reserve(accountId, 50_500)).thenReturn(1)
 
-        service.hold(command)
+        service.hold(instruction)
 
         verify(holdRepository).insert(any(), eq(accountId), eq(reference), eq(50_500L))
         verify(accountRepository).reserve(accountId, 50_500)
@@ -72,7 +72,7 @@ class HoldServiceTest : BaseUnitTest() {
         aNewReference()
         whenever(accountRepository.reserve(accountId, 50_500)).thenReturn(1)
 
-        service.hold(command)
+        service.hold(instruction)
 
         verify(accountRepository, never()).addToBooked(any(), any())
         verify(accountRepository, never()).takeFromAvailable(any(), any())
@@ -83,7 +83,7 @@ class HoldServiceTest : BaseUnitTest() {
         aNewReference()
         whenever(accountRepository.reserve(accountId, 50_500)).thenReturn(1)
 
-        val receipt = service.hold(command)
+        val receipt = service.hold(instruction)
 
         val writtenUuid = argumentCaptor<UUID>()
         verify(holdRepository).insert(writtenUuid.capture(), eq(accountId), eq(reference), eq(50_500L))
@@ -96,7 +96,7 @@ class HoldServiceTest : BaseUnitTest() {
         aNewReference()
         whenever(accountRepository.reserve(accountId, 50_500)).thenReturn(1)
 
-        service.hold(command)
+        service.hold(instruction)
 
         val order = inOrder(holdRepository, accountRepository)
         order.verify(holdRepository).insert(any(), any(), any(), any())
@@ -108,7 +108,7 @@ class HoldServiceTest : BaseUnitTest() {
         aNewReference()
         whenever(accountRepository.reserve(accountId, 50_500)).thenReturn(0)
 
-        val error = assertThrows<InsufficientFundsException> { service.hold(command) }
+        val error = assertThrows<InsufficientFundsException> { service.hold(instruction) }
 
         assertTrue(error.message!!.contains(user.toString()))
         assertTrue(error.message!!.contains(accountUuid.toString()))
@@ -121,7 +121,7 @@ class HoldServiceTest : BaseUnitTest() {
         whenever(holdRepository.insert(any(), eq(accountId), eq(reference), eq(50_500L))).thenReturn(null)
         whenever(holdRepository.getUuidByReference(reference)).thenReturn(firstHoldUuid)
 
-        val receipt = service.hold(command)
+        val receipt = service.hold(instruction)
 
         assertTrue(receipt.replayed)
         assertEquals(firstHoldUuid, receipt.holdUuid)
@@ -184,7 +184,7 @@ class HoldServiceTest : BaseUnitTest() {
         whenever(holdRepository.insert(any(), eq(positionAccountId), eq(reference), eq(6L))).thenReturn(holdId)
         whenever(accountRepository.reserve(positionAccountId, 6)).thenReturn(1)
 
-        val receipt = service.hold(HoldCommand(reference, user, AssetType.POSITION, "ACME", 6))
+        val receipt = service.hold(HoldInstruction(reference, user, AssetType.POSITION, "ACME", 6))
 
         assertFalse(receipt.replayed)
         verify(accountRepository).reserve(positionAccountId, 6)

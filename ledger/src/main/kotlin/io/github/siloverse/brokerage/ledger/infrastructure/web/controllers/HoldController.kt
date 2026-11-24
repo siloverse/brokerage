@@ -1,7 +1,7 @@
 package io.github.siloverse.brokerage.ledger.infrastructure.web.controllers
 
 import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
-import io.github.siloverse.brokerage.ledger.application.hold.model.HoldCommand
+import io.github.siloverse.brokerage.ledger.application.hold.model.HoldInstruction
 import io.github.siloverse.brokerage.ledger.application.hold.services.HoldService
 import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.HoldRequest
@@ -23,7 +23,7 @@ class HoldController(private val holdService: HoldService) {
     @PostMapping
     fun hold(@RequestBody request: HoldRequest): ResponseEntity<HoldResponse> {
         val receipt = holdService.hold(
-            HoldCommand(
+            HoldInstruction(
                 reference = request.reference,
                 userUuid = request.userUuid,
                 assetType = request.assetType,
