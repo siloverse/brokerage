@@ -852,3 +852,63 @@ cannot cover (the hold, the free balance, the receivable); Observer for `Transfe
 rules moving from the instruction into `Fill`.
 
 Next: the fill the hold cannot cover.
+
+## 2026-11-25 — 1.3 Holds, last piece: a fill is always booked
+
+Until now a fill the hold could not cover was refused with 409. A fill is a fact: the venue
+has executed the trade. Refusing it loses a real trade and the books stop matching the
+venue. Now every fill is booked.
+
+- **Three sources, in order.** What is left in the hold, then the user's free balance, then
+  a `CUSTOMER_RECEIVABLE` account for the rest. The user's account never goes below zero;
+  the receivable goes negative instead and reads "this user owes us this much". A released
+  hold is never reopened. Suspense stays for what we cannot explain; a known debt is a
+  receivable.
+- **Migration V3.** One new account type, no new table. A receivable belongs to a user and
+  can never be above zero.
+- **Chain of Responsibility.** `HoldFundingHandler` → `AvailableFundingHandler` →
+  `ReceivableFundingHandler`. Each takes what it can and passes the rest on. Pure
+  calculation, so it lives in the domain and is tested without a database. The sell side
+  uses the same chain, counted in shares.
+- **Lock first, then decide, then write.** The first plan was "take what is there" updates
+  that return the amount taken. That would lock the user's cash row before lower-id rows
+  and break the lock order, and a command's amount would depend on an earlier command's
+  result. Instead a fill locks the hold row and its account rows (`select … for no key
+  update`, accounts `order by id`), reads the hold's rest and the free balance under those
+  locks, decides the split in plain code, and writes with the commands as before.
+- **Entries by funding source.** The user's side of a buy is one entry per source that paid.
+  A normal buy has five entries, not six; price and fee stay separate on the receiving side.
+
+Found by the concurrency tests, in the first run: **`for update` deadlocked.** Every fill
+inserts a transfer that points at its hold, and the foreign key takes a weak lock on the
+hold row (`for key share`). Two fills each held that and each asked for `for update`, which
+conflicts with it. `for no key update` is what a normal update takes and does not conflict.
+An explicit lock should be no stronger than the write it protects.
+
+Also found: an old deposit test summed all settlement accounts before and read only the EUR
+cash one after. It passed or failed depending on which test class ran first.
+
+Decided, not built yet (Awais, after two outside reviews of the locking):
+
+- An `OrderedLockManager` in the domain: a transaction declares an `AccountLockPlan` (every
+  account it may change, and the hold), the manager locks in the one order and returns
+  `LockedResources`; `TransferInvoker` refuses a command on an account that was not locked.
+- The receivable is ensured up front and is part of the plan. Today it is found after the
+  locks, which is safe only by an argument (the user's own account is a gate), not by
+  construction. An empty receivable account is the price.
+- Deposits and withdrawals lock through the manager too: one policy, no optional plan.
+- The locking reads must run inside the ledger transaction.
+- Later: a build rule for who may call what, a retry on deadlock (40P01), ordered account
+  creation.
+
+Lock ordering is not one of the book patterns; it is a concurrency rule. The patterns only
+help to give it one home.
+
+Tests: a fill after the release; a shortfall into the receivable; all three sources in one
+fill; ten fills racing on one hold; ten fills on a balance that covers a third of them, cash
+stops exactly at zero; a fill racing a release, where either order leaves the same books.
+
+Not yet done: recovery of a receivable (repayment, selling the position, write-off); a fill
+for a reference we have never seen.
+
+Next: 1.4, the per-asset check; then the lock manager.

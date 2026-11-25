@@ -62,13 +62,13 @@ class FillIntegrationTest : BaseIntegrationTest() {
         UUID.fromString(Regex("\"transferUuid\":\"([^\"]+)\"").find(result.response.contentAsString)!!.groupValues[1])
 
     private fun cash(user: UUID): Balance =
-        jdbc.sql("select booked, reserved, available from accounts where user_uuid = :user and asset_type = 'CASH'")
+        jdbc.sql("select booked, reserved, available from accounts where user_uuid = :user and type = 'USER' and asset_type = 'CASH'")
             .param("user", user)
             .query { rs, _ -> Balance(rs.getLong("booked"), rs.getLong("reserved"), rs.getLong("available")) }
             .single()
 
     private fun shares(user: UUID, instrument: String): Long =
-        jdbc.sql("select booked from accounts where user_uuid = :user and asset_type = 'POSITION' and asset_code = :code")
+        jdbc.sql("select booked from accounts where user_uuid = :user and type = 'USER' and asset_type = 'POSITION' and asset_code = :code")
             .param("user", user).param("code", instrument)
             .query(Long::class.java).optional().orElse(0L)
 
@@ -76,6 +76,10 @@ class FillIntegrationTest : BaseIntegrationTest() {
         jdbc.sql("select booked from accounts where type = :type and asset_type = :asset_type and asset_code = :code")
             .param("type", type).param("asset_type", assetType).param("code", code)
             .query(Long::class.java).optional().orElse(0L)
+
+    private fun receivable(user: UUID): Long =
+        jdbc.sql("select booked from accounts where user_uuid = :user and type = 'CUSTOMER_RECEIVABLE' and asset_type = 'CASH'")
+            .param("user", user).query(Long::class.java).optional().orElse(0L)
 
     private fun holdRow(reference: UUID): HoldRow =
         jdbc.sql("select amount, consumed, released from holds where reference = :reference").param("reference", reference)
@@ -117,7 +121,7 @@ class FillIntegrationTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `a fill is one transfer with the hold, and six entries that sum to zero for each asset`() {
+    fun `a fill is one transfer with the hold, and five entries that sum to zero for each asset`() {
         val user = aUserWith(100_000)
         val reference = aHold(user, 50_500)
         val instrument = anInstrument()
@@ -132,7 +136,7 @@ class FillIntegrationTest : BaseIntegrationTest() {
             )
         )
         assertEquals(
-            6,
+            5,
             count("select count(*) from ledger_entries e join transfers t on t.id = e.transfer_id where t.uuid = :uuid", "uuid" to transfer)
         )
         assertEquals(
@@ -243,32 +247,116 @@ class FillIntegrationTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `a fill that needs more than the hold has left is a 409 and writes nothing`() {
+    fun `a fill that costs more than the hold has left takes the rest from the free balance`() {
         val user = aUserWith(100_000)
         val reference = aHold(user, 50_500)
         val instrument = anInstrument()
-        val execution = UUID.randomUUID()
 
-        val result = fill(execution, reference, instrument, quantity = 11, amount = 50_400, fee = 200)
+        val result = fill(UUID.randomUUID(), reference, instrument, quantity = 11, amount = 50_400, fee = 200)
 
-        assertEquals(409, result.response.status)
-        assertTrue(result.response.contentAsString.contains("error"))
-        assertEquals(Balance(booked = 100_000, reserved = 50_500, available = 49_500), cash(user))
-        assertEquals(0, shares(user, instrument))
-        assertEquals(HoldRow(amount = 50_500, consumed = 0, released = 0), holdRow(reference))
-        assertEquals(0, count("select count(*) from transfers where idempotency_key = :key", "key" to execution))
+        assertEquals(201, result.response.status)
+        assertEquals(HoldRow(amount = 50_500, consumed = 50_500, released = 0), holdRow(reference))
+        assertEquals(Balance(booked = 49_400, reserved = 0, available = 49_400), cash(user))
+        assertEquals(11, shares(user, instrument))
+        assertEquals(0, receivable(user))
+        assertEquals(
+            listOf(-50_500L, -100L),
+            jdbc.sql(
+                """
+                select e.amount from ledger_entries e
+                join transfers t on t.id = e.transfer_id
+                join accounts a on a.id = e.account_id
+                where t.uuid = :uuid and a.user_uuid = :user and a.asset_type = 'CASH'
+                order by e.amount
+                """.trimIndent()
+            ).param("uuid", transferUuid(result)).param("user", user).query(Long::class.java).list()
+        )
     }
 
     @Test
-    fun `a fill that arrives after the release is a 409 today`() {
+    fun `a fill that arrives after the release is booked from the free balance, and the hold stays closed`() {
         val user = aUserWith(100_000)
         val reference = aHold(user, 50_500)
+        val instrument = anInstrument()
         assertEquals(200, release(reference))
+
+        val result = fill(UUID.randomUUID(), reference, instrument, quantity = 4, amount = 20_000, fee = 200)
+
+        assertEquals(201, result.response.status)
+        assertEquals(Balance(booked = 79_800, reserved = 0, available = 79_800), cash(user))
+        assertEquals(4, shares(user, instrument))
+        assertEquals(HoldRow(amount = 50_500, consumed = 0, released = 50_500), holdRow(reference))
+        assertEquals(0, receivable(user))
+    }
+
+    @Test
+    fun `what neither the hold nor the free balance covers becomes a receivable, and the cash never goes below zero`() {
+        val user = aUserWith(10_000)
+        val reference = aHold(user, 10_000)
+        val instrument = anInstrument()
+        assertEquals(200, release(reference))
+
+        val result = fill(UUID.randomUUID(), reference, instrument, quantity = 4, amount = 20_000, fee = 200)
+
+        assertEquals(201, result.response.status)
+        assertEquals(Balance(booked = 0, reserved = 0, available = 0), cash(user))
+        assertEquals(-10_200, receivable(user))
+        assertEquals(4, shares(user, instrument))
+        assertEquals(
+            6,
+            count(
+                "select count(*) from ledger_entries e join transfers t on t.id = e.transfer_id where t.uuid = :uuid",
+                "uuid" to transferUuid(result)
+            )
+        )
+        assertEquals(0, accountsWhereCopyDiffersFromEntries())
+        assertEquals(0, assetsThatDoNotSumToZero())
+    }
+
+    @Test
+    fun `one fill can need all three sources`() {
+        val user = aUserWith(10_000)
+        val reference = aHold(user, 5_000)
 
         val result = fill(UUID.randomUUID(), reference, anInstrument(), quantity = 4, amount = 20_000, fee = 200)
 
-        assertEquals(409, result.response.status)
-        assertEquals(Balance(booked = 100_000, reserved = 0, available = 100_000), cash(user))
+        assertEquals(201, result.response.status)
+        assertEquals(HoldRow(amount = 5_000, consumed = 5_000, released = 0), holdRow(reference))
+        assertEquals(Balance(booked = 0, reserved = 0, available = 0), cash(user))
+        assertEquals(-10_200, receivable(user))
+        assertEquals(0, assetsThatDoNotSumToZero())
+    }
+
+    @Test
+    fun `a fill that is fully covered opens no receivable account`() {
+        val user = aUserWith(100_000)
+        val reference = aHold(user, 50_500)
+
+        fill(UUID.randomUUID(), reference, anInstrument(), quantity = 4, amount = 20_000, fee = 200)
+
+        assertEquals(
+            0,
+            count("select count(*) from accounts where user_uuid = :user and type = 'CUSTOMER_RECEIVABLE'", "user" to user)
+        )
+    }
+
+    @Test
+    fun `a second shortfall adds to the same receivable, and a later deposit does not pay it off by itself`() {
+        val user = aUserWith(1_000)
+        val reference = aHold(user, 1_000)
+        val instrument = anInstrument()
+        assertEquals(200, release(reference))
+
+        assertEquals(201, fill(UUID.randomUUID(), reference, instrument, quantity = 1, amount = 4_900, fee = 100).response.status)
+        assertEquals(201, fill(UUID.randomUUID(), reference, instrument, quantity = 1, amount = 4_900, fee = 100).response.status)
+        assertEquals(201, money("/api/ledger/deposits", user, 3_000).response.status)
+
+        assertEquals(-9_000, receivable(user))
+        assertEquals(Balance(booked = 3_000, reserved = 0, available = 3_000), cash(user))
+        assertEquals(
+            1,
+            count("select count(*) from accounts where user_uuid = :user and type = 'CUSTOMER_RECEIVABLE'", "user" to user)
+        )
     }
 
     @Test
@@ -300,7 +388,7 @@ class FillIntegrationTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `ten fills of 30 on a hold of 90 at the same moment, exactly three are booked`() {
+    fun `ten fills of 30 on a hold of 90 at the same moment are all booked, the hold once and the rest from the free balance`() {
         val user = aUserWith(1_000)
         val reference = aHold(user, 90)
         val instrument = anInstrument()
@@ -317,11 +405,69 @@ class FillIntegrationTest : BaseIntegrationTest() {
             .map { it.get(20, TimeUnit.SECONDS) }
         pool.shutdown()
 
-        assertEquals(3, statuses.count { it == 201 }, "statuses: $statuses")
-        assertEquals(7, statuses.count { it == 409 }, "statuses: $statuses")
-        assertEquals(3, shares(user, instrument))
+        assertEquals(List(10) { 201 }, statuses)
+        assertEquals(10, shares(user, instrument))
         assertEquals(HoldRow(amount = 90, consumed = 90, released = 0), holdRow(reference))
-        assertEquals(Balance(booked = 910, reserved = 0, available = 910), cash(user))
+        assertEquals(Balance(booked = 700, reserved = 0, available = 700), cash(user))
+        assertEquals(0, receivable(user))
+    }
+
+    @Test
+    fun `ten fills of 300 on a balance of 1000 with no hold left book all ten, and the cash stops exactly at zero`() {
+        val user = aUserWith(1_000)
+        val reference = aHold(user, 1_000)
+        val instrument = anInstrument()
+        assertEquals(200, release(reference))
+        val pool = Executors.newFixedThreadPool(10)
+        val start = CountDownLatch(1)
+
+        val statuses = (1..10).map {
+            pool.submit<Int> {
+                start.await()
+                fill(UUID.randomUUID(), reference, instrument, quantity = 1, amount = 290, fee = 10).response.status
+            }
+        }
+            .also { start.countDown() }
+            .map { it.get(20, TimeUnit.SECONDS) }
+        pool.shutdown()
+
+        assertEquals(List(10) { 201 }, statuses)
+        assertEquals(10, shares(user, instrument))
+        assertEquals(Balance(booked = 0, reserved = 0, available = 0), cash(user))
+        assertEquals(-2_000, receivable(user))
+        assertEquals(0, accountsWhereCopyDiffersFromEntries())
+        assertEquals(0, assetsThatDoNotSumToZero())
+    }
+
+    @Test
+    fun `a fill and a release of the same hold at the same moment, whichever wins the books are the same`() {
+        val instrument = anInstrument()
+        val orders = (1..10).map { aUserWith(100_000).let { user -> user to aHold(user, 50_500) } }
+        val pool = Executors.newFixedThreadPool(10)
+        val start = CountDownLatch(1)
+
+        val tasks = orders.flatMap { (_, reference) ->
+            listOf(
+                pool.submit<Int> { start.await(); fill(UUID.randomUUID(), reference, instrument, quantity = 4, amount = 20_000, fee = 200).response.status },
+                pool.submit<Int> { start.await(); release(reference) },
+            )
+        }
+        start.countDown()
+        val statuses = tasks.map { it.get(30, TimeUnit.SECONDS) }
+        pool.shutdown()
+
+        assertEquals(10, statuses.count { it == 201 }, "statuses: $statuses")
+        assertEquals(10, statuses.count { it == 200 }, "statuses: $statuses")
+        orders.forEach { (user, reference) ->
+            val hold = holdRow(reference)
+            assertEquals(50_500, hold.consumed + hold.released, "the hold is closed either way: $hold")
+            assertTrue(hold.consumed == 20_200L || hold.consumed == 0L, "the fill used the hold fully or not at all: $hold")
+            assertEquals(Balance(booked = 79_800, reserved = 0, available = 79_800), cash(user))
+            assertEquals(4, shares(user, instrument))
+            assertEquals(0, receivable(user))
+        }
+        assertEquals(0, accountsWhereCopyDiffersFromEntries())
+        assertEquals(0, assetsThatDoNotSumToZero())
     }
 
     @Test

@@ -11,4 +11,5 @@ interface HoldRepository {
     fun findUserHoldByReference(reference: UUID): UserHold?
     fun release(reference: UUID): ReleasedHold?
     fun consumeHold(id: Long, amount: Long): Int
+    fun lockRest(holdId: Long): Long
 }

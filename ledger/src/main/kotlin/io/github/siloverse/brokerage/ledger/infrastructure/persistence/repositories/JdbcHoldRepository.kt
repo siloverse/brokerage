@@ -101,4 +101,18 @@ class JdbcHoldRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClient) 
             .optional()
             .orElse(null)
     }
+
+    override fun lockRest(holdId: Long): Long {
+        return jdbc.sql(
+            """
+               select amount - consumed - released
+               from holds
+               where id = :id
+               for no key update
+            """.trimIndent()
+        )
+            .param("id", holdId)
+            .query(Long::class.java)
+            .single()
+    }
 }

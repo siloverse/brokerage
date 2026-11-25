@@ -161,6 +161,22 @@ class JdbcAccountRepository(@Qualifier("ledgerJdbc") private val jdbc: JdbcClien
             .update()
     }
 
+    override fun lockAvailable(accountIds: List<Long>): Map<Long, Long> {
+        return jdbc.sql(
+            """
+                select id, available
+                from accounts
+                where id in (:ids)
+                order by id
+                for no key update
+            """.trimIndent()
+        )
+            .param("ids", accountIds)
+            .query { rs, _ -> rs.getLong("id") to rs.getLong("available") }
+            .list()
+            .toMap()
+    }
+
 
 
     private fun insertAccount(

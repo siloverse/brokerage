@@ -22,4 +22,5 @@ interface AccountRepository {
     fun reserve(accountId: Long, amount: Long): Int
     fun release(accountId: Long, amount: Long): Int
     fun settleReserved(accountId: Long, amount: Long): Int
+    fun lockAvailable(accountIds: List<Long>): Map<Long, Long>
 }

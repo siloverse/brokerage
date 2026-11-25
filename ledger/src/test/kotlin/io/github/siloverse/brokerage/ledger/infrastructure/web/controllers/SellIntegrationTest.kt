@@ -70,10 +70,14 @@ class SellIntegrationTest : BaseIntegrationTest() {
         UUID.fromString(Regex("\"transferUuid\":\"([^\"]+)\"").find(result.response.contentAsString)!!.groupValues[1])
 
     private fun balance(user: UUID, assetType: String, code: String): Balance =
-        jdbc.sql("select booked, reserved, available from accounts where user_uuid = :user and asset_type = :type and asset_code = :code")
+        jdbc.sql("select booked, reserved, available from accounts where user_uuid = :user and type = 'USER' and asset_type = :type and asset_code = :code")
             .param("user", user).param("type", assetType).param("code", code)
             .query { rs, _ -> Balance(rs.getLong("booked"), rs.getLong("reserved"), rs.getLong("available")) }
             .optional().orElse(noShares)
+
+    private fun shareReceivable(user: UUID, instrument: String): Long =
+        jdbc.sql("select booked from accounts where user_uuid = :user and type = 'CUSTOMER_RECEIVABLE' and asset_type = 'POSITION' and asset_code = :code")
+            .param("user", user).param("code", instrument).query(Long::class.java).optional().orElse(0L)
 
     private fun cash(user: UUID) = balance(user, "CASH", "EUR")
     private fun shares(user: UUID, instrument: String) = balance(user, "POSITION", instrument)
@@ -325,19 +329,51 @@ class SellIntegrationTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `a sell of more shares than the hold has left is a 409 and writes nothing`() {
+    fun `a sell of more shares than the hold has left takes the rest from the free shares`() {
         val instrument = anInstrument()
         val user = aUserWithShares(instrument, 10)
         val reference = aShareHold(user, instrument, 6)
-        val execution = UUID.randomUUID()
 
-        val result = fill(execution, reference, instrument, quantity = 7, amount = 35_000, fee = 350)
+        val result = fill(UUID.randomUUID(), reference, instrument, quantity = 7, amount = 35_000, fee = 350)
 
-        assertEquals(409, result.response.status)
-        assertEquals(Balance(booked = 10, reserved = 6, available = 4), shares(user, instrument))
-        assertEquals(Balance(booked = 90_000, reserved = 0, available = 90_000), cash(user))
-        assertEquals(HoldRow(amount = 6, consumed = 0, released = 0), holdRow(reference))
-        assertEquals(0, count("select count(*) from transfers where idempotency_key = :key", "key" to execution))
+        assertEquals(201, result.response.status)
+        assertEquals(HoldRow(amount = 6, consumed = 6, released = 0), holdRow(reference))
+        assertEquals(Balance(booked = 3, reserved = 0, available = 3), shares(user, instrument))
+        assertEquals(Balance(booked = 124_650, reserved = 0, available = 124_650), cash(user))
+        assertEquals(0, shareReceivable(user, instrument))
+    }
+
+    @Test
+    fun `a sell of more shares than the user owns leaves a share receivable, and the position stops at zero`() {
+        val instrument = anInstrument()
+        val user = aUserWithShares(instrument, 10)
+        val reference = aShareHold(user, instrument, 6)
+
+        val result = fill(UUID.randomUUID(), reference, instrument, quantity = 12, amount = 60_000, fee = 600)
+
+        assertEquals(201, result.response.status)
+        assertEquals(HoldRow(amount = 6, consumed = 6, released = 0), holdRow(reference))
+        assertEquals(Balance(booked = 0, reserved = 0, available = 0), shares(user, instrument))
+        assertEquals(-2, shareReceivable(user, instrument))
+        assertEquals(2, house("VENUE_SETTLEMENT", "POSITION", instrument))
+        assertEquals(Balance(booked = 149_400, reserved = 0, available = 149_400), cash(user))
+        assertEquals(0, accountsWhereCopyDiffersFromEntries())
+        assertEquals(0, assetsThatDoNotSumToZero())
+    }
+
+    @Test
+    fun `a sell that arrives after its hold was released takes the shares from the free position`() {
+        val instrument = anInstrument()
+        val user = aUserWithShares(instrument, 10)
+        val reference = aShareHold(user, instrument, 6)
+        assertEquals(200, release(reference))
+
+        val result = fill(UUID.randomUUID(), reference, instrument, quantity = 4, amount = 20_000, fee = 200)
+
+        assertEquals(201, result.response.status)
+        assertEquals(HoldRow(amount = 6, consumed = 0, released = 6), holdRow(reference))
+        assertEquals(Balance(booked = 6, reserved = 0, available = 6), shares(user, instrument))
+        assertEquals(0, shareReceivable(user, instrument))
     }
 
     @Test
@@ -368,7 +404,7 @@ class SellIntegrationTest : BaseIntegrationTest() {
     // ---- at the same moment
 
     @Test
-    fun `ten sells of one share on a hold of three at the same moment, exactly three are booked`() {
+    fun `ten sells of one share on a hold of three at the same moment are all booked, the hold once and the rest from the free shares`() {
         val instrument = anInstrument()
         val user = aUserWithShares(instrument, 10)
         val reference = aShareHold(user, instrument, 3)
@@ -385,11 +421,11 @@ class SellIntegrationTest : BaseIntegrationTest() {
             .map { it.get(20, TimeUnit.SECONDS) }
         pool.shutdown()
 
-        assertEquals(3, statuses.count { it == 201 }, "statuses: $statuses")
-        assertEquals(7, statuses.count { it == 409 }, "statuses: $statuses")
-        assertEquals(Balance(booked = 7, reserved = 0, available = 7), shares(user, instrument))
-        assertEquals(Balance(booked = 104_850, reserved = 0, available = 104_850), cash(user))
+        assertEquals(List(10) { 201 }, statuses)
+        assertEquals(Balance(booked = 0, reserved = 0, available = 0), shares(user, instrument))
+        assertEquals(Balance(booked = 139_500, reserved = 0, available = 139_500), cash(user))
         assertEquals(HoldRow(amount = 3, consumed = 3, released = 0), holdRow(reference))
+        assertEquals(0, shareReceivable(user, instrument))
     }
 
     @Test
