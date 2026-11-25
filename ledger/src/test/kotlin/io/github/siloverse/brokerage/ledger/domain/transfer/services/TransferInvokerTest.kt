@@ -2,13 +2,18 @@ package io.github.siloverse.brokerage.ledger.domain.transfer.services
 
 import io.github.siloverse.brokerage.ledger.BaseUnitTest
 import io.github.siloverse.brokerage.ledger.domain.account.command.Command
+import io.github.siloverse.brokerage.ledger.domain.account.model.UnbalancedAsset
+import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
+import io.github.siloverse.brokerage.ledger.domain.transfer.exception.UnbalancedTransferException
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.LedgerEntryRepository
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
+import org.mockito.kotlin.inOrder
 import org.mockito.kotlin.verify
-import org.mockito.kotlin.verifyNoInteractions
-import org.mockito.kotlin.verifyNoMoreInteractions
+import org.mockito.kotlin.whenever
 
 class TransferInvokerTest : BaseUnitTest() {
 
@@ -33,7 +38,6 @@ class TransferInvokerTest : BaseUnitTest() {
 
         verify(ledgerEntryRepository).insert(1, 30, 400)
         verify(ledgerEntryRepository).insert(1, 10, -400)
-        verifyNoMoreInteractions(ledgerEntryRepository)
     }
 
     @Test
@@ -57,9 +61,29 @@ class TransferInvokerTest : BaseUnitTest() {
     }
 
     @Test
-    fun `no commands means no entries`() {
-        TransferInvoker(ledgerEntryRepository).invoke(transferId = 1, commands = emptyList())
+    fun `the balance of the transfer is asked for after its entries are written`() {
+        val invoker = TransferInvoker(ledgerEntryRepository)
 
-        verifyNoInteractions(ledgerEntryRepository)
+        invoker.invoke(transferId = 1, commands = listOf(aCommand(30, 400), aCommand(10, -400)))
+
+        val order = inOrder(ledgerEntryRepository)
+        order.verify(ledgerEntryRepository).insert(1, 30, 400)
+        order.verify(ledgerEntryRepository).insert(1, 10, -400)
+        order.verify(ledgerEntryRepository).findUnbalancedAssets(1)
+    }
+
+    @Test
+    fun `a transfer that does not sum to zero is refused before any command runs`() {
+        val tooMuch = UnbalancedAsset(AssetType.CASH, "EUR", 100)
+        whenever(ledgerEntryRepository.findUnbalancedAssets(1)).thenReturn(listOf(tooMuch))
+        val invoker = TransferInvoker(ledgerEntryRepository)
+
+        val refused = assertThrows(UnbalancedTransferException::class.java) {
+            invoker.invoke(transferId = 1, commands = listOf(aCommand(30, 500), aCommand(10, -400)))
+        }
+
+        assertEquals(1, refused.transferId)
+        assertEquals(listOf(tooMuch), refused.unbalancedAssets)
+        assertTrue(executed.isEmpty())
     }
 }

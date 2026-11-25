@@ -912,3 +912,44 @@ Not yet done: recovery of a receivable (repayment, selling the position, write-o
 for a reference we have never seen.
 
 Next: 1.4, the per-asset check; then the lock manager.
+
+## 2026-11-25 — 1.4 Double entry, checked per asset
+
+The ledger's promise is that value only moves; it never appears or disappears. Until now
+only the tests checked that. Now the code checks it, in two places.
+
+- **Per asset, not in total.** A fill moves euros and shares. +4 euros against −4 shares
+  sums to zero and is still wrong. So the sum is taken per asset: `group by asset_type,
+  asset_code`.
+- **At write time.** `TransferInvoker` writes the entries, asks the database which assets of
+  this transfer do not sum to zero, and throws `UnbalancedTransferException` if any. It asks
+  before it touches a balance. The exception rolls back the entries and the transfer row.
+  Every transfer goes through the Invoker, so a new transfer kind cannot unbalance the
+  books, however its commands were put together. The price is one more query per transfer.
+- **It is our bug, not the user's.** The exception is an `IllegalStateException` and is not
+  mapped to a 4xx. It should be loud.
+- **Over the whole ledger.** `GET /api/ledger/check` runs three rules over all rows and
+  answers with what it found:
+  1. every transfer sums to zero per asset;
+  2. every account's `booked` equals the sum of its entries;
+  3. every account's `reserved` equals what is still open of its holds.
+- **Why both.** The check at write time catches a mistake in our code when it happens. The
+  check over everything catches what went around the code: manual SQL, a bad migration, a
+  restored backup.
+- **Each rule sees what the others cannot.** One entry without a partner breaks rule 1 only.
+  A balance changed without an entry breaks rule 2 only. A reservation without a hold breaks
+  rule 3 only. The tests do each damage on purpose, inside a transaction that is rolled
+  back, because all integration tests share one database.
+- **SQL details.** `left join` so an account without entries is still checked; `coalesce`
+  because the sum over no rows is `null`, not 0.
+- **Not exposed to other modules.** The check sits in `domain/check`, `application/check`
+  and the web layer; the ledger's `api` is still empty. The controller answers with its own
+  web class, not with the domain report.
+
+Mentioned, not added: a deferred constraint trigger that checks rule 1 at commit (it would
+also stop manual SQL, and puts logic into the database); running the check every night and
+alerting; comparing with the venue's and the bank's statements (chapter 9).
+
+Not yet done: the three queries by hand in psql against the VM database.
+
+Next: 1.5, the five isolation histories by hand.

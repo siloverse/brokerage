@@ -68,6 +68,7 @@ class DepositFundsServiceTest : BaseUnitTest() {
 
         verify(ledgerEntryRepository).insert(transferId, userAccountId, 10_000)
         verify(ledgerEntryRepository).insert(transferId, settlementAccountId, -10_000)
+        verify(ledgerEntryRepository).findUnbalancedAssets(transferId)
         verifyNoMoreInteractions(ledgerEntryRepository)
         verify(accountRepository).addToBooked(userAccountId, 10_000)
         verify(accountRepository).removeFromBooked(settlementAccountId, 10_000)
