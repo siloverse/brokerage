@@ -72,6 +72,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
 
         verify(ledgerEntryRepository).insert(transferId, 10L, -5_000)
         verify(ledgerEntryRepository).insert(transferId, 20L, 5_000)
+        verify(ledgerEntryRepository).findUnbalancedAssets(transferId)
         verifyNoMoreInteractions(ledgerEntryRepository)
         verify(accountRepository).takeFromAvailable(10L, 5_000)
         verify(accountRepository).addToBooked(20L, 5_000)

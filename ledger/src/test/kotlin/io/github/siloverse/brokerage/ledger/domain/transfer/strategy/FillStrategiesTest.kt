@@ -141,6 +141,7 @@ class FillStrategiesTest : BaseUnitTest() {
         verify(ledgerEntryRepository).insert(transferId, feeIncome, 200)
         verify(ledgerEntryRepository).insert(transferId, venuePosition, -4)
         verify(ledgerEntryRepository).insert(transferId, userPosition, 4)
+        verify(ledgerEntryRepository).findUnbalancedAssets(transferId)
         verifyNoMoreInteractions(ledgerEntryRepository)
         verify(accountRepository).settleReserved(userCash, 20_200)
         verify(accountRepository).addToBooked(settlementCash, 20_000)
@@ -227,6 +228,7 @@ class FillStrategiesTest : BaseUnitTest() {
         verify(ledgerEntryRepository).insert(transferId, settlementCash, 20_000)
         verify(ledgerEntryRepository).insert(transferId, venuePosition, -4)
         verify(ledgerEntryRepository).insert(transferId, userPosition, 4)
+        verify(ledgerEntryRepository).findUnbalancedAssets(transferId)
         verifyNoMoreInteractions(ledgerEntryRepository)
         verify(accountRepository, never()).addToBooked(eq(feeIncome), any())
     }
@@ -267,6 +269,7 @@ class FillStrategiesTest : BaseUnitTest() {
         verify(ledgerEntryRepository).insert(transferId, userCash, 20_000)
         verify(ledgerEntryRepository).insert(transferId, userCash, -200)
         verify(ledgerEntryRepository).insert(transferId, feeIncome, 200)
+        verify(ledgerEntryRepository).findUnbalancedAssets(transferId)
         verifyNoMoreInteractions(ledgerEntryRepository)
         verify(accountRepository).settleReserved(userPosition, 4)
         verify(accountRepository).addToBooked(venuePosition, 4)
