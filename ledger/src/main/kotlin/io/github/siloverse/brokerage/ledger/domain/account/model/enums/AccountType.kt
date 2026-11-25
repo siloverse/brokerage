@@ -5,4 +5,5 @@ enum class AccountType {
     FEE_INCOME,
     VENUE_SETTLEMENT,
     SUSPENSE,
+    CUSTOMER_RECEIVABLE
 }

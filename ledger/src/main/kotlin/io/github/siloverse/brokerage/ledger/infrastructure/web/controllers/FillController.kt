@@ -3,7 +3,6 @@ package io.github.siloverse.brokerage.ledger.infrastructure.web.controllers
 import io.github.siloverse.brokerage.ledger.application.fill.model.FillInstruction
 import io.github.siloverse.brokerage.ledger.application.fill.services.FillService
 import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
-import io.github.siloverse.brokerage.ledger.domain.hold.exception.HoldFillException
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.FillRequest
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.FillResponse
 import org.springframework.http.HttpStatus
@@ -47,8 +46,4 @@ class FillController(private val fillService: FillService) {
     @ExceptionHandler(HoldNotFoundException::class)
     fun notFound(e: HoldNotFoundException): ResponseEntity<Map<String, String?>> =
         ResponseEntity.status(HttpStatus.NOT_FOUND).body(mapOf("error" to e.message))
-
-    @ExceptionHandler(HoldFillException::class)
-    fun holdTooSmall(e: HoldFillException): ResponseEntity<Map<String, String?>> =
-        ResponseEntity.status(HttpStatus.CONFLICT).body(mapOf("error" to e.message))
 }

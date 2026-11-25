@@ -68,7 +68,7 @@ When a chapter needs an exception, write it down here first.
   (`FillRequest`).
 - Design patterns are named with the words of *Design Patterns* (Gamma, Helm, Johnson,
   Vlissides) and *Head First Design Patterns*, in class names and in conversation. The
-  ledger uses three:
+  ledger uses four:
   - **Command**: `Command` and its concrete commands in `domain.account.command`, with
     `AccountRepository` as the receiver and `TransferInvoker` as the invoker. The invoker
     writes one ledger entry per command and executes them in ascending account id.
@@ -76,6 +76,9 @@ When a chapter needs an exception, write it down here first.
     `domain.transfer.strategy`; `FillService` is the context.
   - **Template Method**: `TransferTemplate` in `application.transfer.services` is the
     abstract class; the deposit, withdrawal and fill services are its concrete classes.
+  - **Chain of Responsibility**: `FundingHandler` and its three handlers in
+    `domain.transfer.funding` decide where the money for a fill comes from: the hold, the
+    free balance, the receivable.
 - A domain class carries no Spring annotation. When Spring must manage one, a
   `@Configuration` class in the `application` layer declares the bean
   (`application.transfer.config`).
@@ -156,6 +159,30 @@ contract into its own model. Messages are never pooled into a generic `shared` o
   commit, with a durable log so an in-process event is not lost on a crash.
 - An in-process event is not retried by magic. Outbox, retries, and idempotency keys
   arrive where a chapter's reliability requirement calls for them (chapter 1 ledger first).
+
+### Lock order in the ledger
+
+Every ledger transaction takes its row locks in one order. A transaction that breaks it can
+deadlock with any other.
+
+1. The hold row, if the transaction has one.
+2. The account rows, in ascending `accounts.id`.
+
+- Balance changes go through commands and `TransferInvoker`, which executes them in that
+  order. A service never updates an account row directly, except the hold service for its
+  single account.
+- A transaction that must read before it decides (a fill) locks first, with
+  `HoldRepository.lockRest` and `AccountRepository.lockAvailable`, then decides, then
+  writes. `lockAvailable` orders the rows in SQL (`order by id`); sorting a Kotlin list
+  does not decide the order in which PostgreSQL locks.
+- A locking read uses `for no key update`, the lock a normal update takes. `for update` is
+  stronger and conflicts with the lock a foreign key takes on the row it points at: two
+  fills that had each inserted a transfer for the same hold deadlocked on it.
+- Inserts lock too: a foreign key locks the row it points at, and a unique index makes a
+  second insert of the same key wait for the first.
+- One exception, to be removed: a user's receivable account is found and changed after the
+  other accounts are locked. It is safe today only because every transaction that touches
+  it locks that user's cash or position account first.
 
 ## 7. Build rules
 

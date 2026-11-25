@@ -36,7 +36,7 @@ class DepositIntegrationTest : BaseIntegrationTest() {
     fun `a deposit is booked once with one transfer, two entries that sum to zero, and both balances moved`() {
         val user = UUID.randomUUID()
         val key = UUID.randomUUID()
-        val settlementBefore = count("select coalesce(sum(booked), 0) from accounts where type = 'VENUE_SETTLEMENT'")
+        val settlementBefore = count("select coalesce(sum(booked), 0) from accounts where type = 'VENUE_SETTLEMENT' and asset_type = 'CASH' and asset_code = 'EUR'")
 
         val result = deposit(key, user, 10_000)
 
@@ -44,7 +44,7 @@ class DepositIntegrationTest : BaseIntegrationTest() {
         assertEquals(10_000, booked(user))
         assertEquals(
             settlementBefore - 10_000,
-            count("select booked from accounts where type = 'VENUE_SETTLEMENT' and asset_code = 'EUR'")
+            count("select booked from accounts where type = 'VENUE_SETTLEMENT' and asset_type = 'CASH' and asset_code = 'EUR'")
         )
         assertEquals(1, count("select count(*) from transfers where idempotency_key = :key", "key" to key))
         assertEquals(

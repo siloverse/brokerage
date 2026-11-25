@@ -6,9 +6,11 @@ import io.github.siloverse.brokerage.ledger.domain.account.command.SettleReserve
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AccountType
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
-import io.github.siloverse.brokerage.ledger.domain.hold.exception.HoldFillException
 import io.github.siloverse.brokerage.ledger.domain.hold.model.UserHold
 import io.github.siloverse.brokerage.ledger.domain.hold.repositories.HoldRepository
+import io.github.siloverse.brokerage.ledger.domain.transfer.funding.AvailableFundingHandler
+import io.github.siloverse.brokerage.ledger.domain.transfer.funding.HoldFundingHandler
+import io.github.siloverse.brokerage.ledger.domain.transfer.funding.ReceivableFundingHandler
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.Fill
 import io.github.siloverse.brokerage.ledger.domain.transfer.services.TransferInvoker
 
@@ -20,65 +22,63 @@ class SellFillStrategy(
 
     override val assetType = AssetType.POSITION
 
-
     override fun validate(fill: Fill, userHold: UserHold) {
         require(userHold.assetCode == fill.assetCode) { "the hold is on another instrument" }
     }
 
     override fun book(fill: Fill, userHold: UserHold, transferId: Long) {
-        val updates = holdRepository.consumeHold(
-            id = userHold.holdId,
-            amount = fill.quantity
-        )
+        val instrument = userHold.assetCode
+        val currency = fill.currency.name
+        val userPositionId = userHold.accountId
 
-        if (updates == 0) {
-            throw HoldFillException(
-                message = "Unable to consume the Hold to sell shares position as too low consumable hold shares are left",
-                holdUuid = userHold.holdUuid,
-                amount = fill.quantity
-            )
+        // 1. lock: the hold row first, then the account rows in ascending id
+        val holdRest = holdRepository.lockRest(userHold.holdId)
+
+        val userCash = accountRepository.ensureAccount(AccountType.USER, AssetType.CASH, currency, userHold.userUuid)
+        val venuePosition =
+            accountRepository.ensureAccount(AccountType.VENUE_SETTLEMENT, AssetType.POSITION, instrument)
+        val settlementCash = accountRepository.ensureAccount(AccountType.VENUE_SETTLEMENT, AssetType.CASH, currency)
+        val feeIncome = accountRepository.ensureAccount(AccountType.FEE_INCOME, AssetType.CASH, currency)
+
+        val available = accountRepository
+            .lockAvailable(listOf(userPositionId, userCash.id, venuePosition.id, settlementCash.id, feeIncome.id))
+            .getValue(userPositionId)
+
+        // 2. decide: where the shares come from
+        val funding = HoldFundingHandler(
+            holdRest,
+            AvailableFundingHandler(available, ReceivableFundingHandler())
+        ).fund(fill.quantity)
+
+        // 3. write
+        if (funding.fromHold > 0) {
+            check(
+                holdRepository.consumeHold(
+                    userHold.holdId,
+                    funding.fromHold
+                ) == 1
+            ) { "the locked hold could not be consumed" }
         }
 
-        val userPositionAccountIdentifier = accountRepository.ensureAccount(
-            accountType = AccountType.USER,
-            assetType = AssetType.POSITION,
-            assetCode = fill.assetCode,
-            userUuid = userHold.userUuid
-        )
-
-        val userCashAccountIdentifier = accountRepository.ensureAccount(
-            accountType = AccountType.USER,
-            assetType = AssetType.CASH,
-            assetCode = fill.currency.name,
-            userUuid = userHold.userUuid
-        )
-
-        val venuePositionAccountIdentifier = accountRepository.ensureAccount(
-            accountType = AccountType.VENUE_SETTLEMENT,
-            assetType = AssetType.POSITION,
-            assetCode = fill.assetCode,
-        )
-
-        val settlementCashAccountIdentifier = accountRepository.ensureAccount(
-            accountType = AccountType.VENUE_SETTLEMENT,
-            assetType = AssetType.CASH,
-            assetCode = fill.currency.name,
-        )
-
-        val feeIncomeAccountIdentifier = accountRepository.ensureAccount(
-            accountType = AccountType.FEE_INCOME,
-            assetType = AssetType.CASH,
-            assetCode = fill.currency.name,
-        )
-
         val commands = buildList {
-            add(SettleReservedCommand(accountRepository, userPositionAccountIdentifier.id, fill.quantity))
-            add(AddToBookedCommand(accountRepository, venuePositionAccountIdentifier.id, fill.quantity))
-            add(RemoveFromBookedCommand(accountRepository, settlementCashAccountIdentifier.id, fill.amount))
-            add(AddToBookedCommand(accountRepository, userCashAccountIdentifier.id, fill.amount))
-            if (fill.fee != 0L) {
-                add(RemoveFromBookedCommand(accountRepository, userCashAccountIdentifier.id, fill.fee))
-                add(AddToBookedCommand(accountRepository, feeIncomeAccountIdentifier.id, fill.fee))
+            if (funding.fromHold > 0) {
+                add(SettleReservedCommand(accountRepository, userPositionId, funding.fromHold))
+            }
+            if (funding.fromAvailable > 0) {
+                add(RemoveFromBookedCommand(accountRepository, userPositionId, funding.fromAvailable))
+            }
+            if (funding.shortfall > 0) {
+                val receivable = accountRepository.ensureAccount(
+                    AccountType.CUSTOMER_RECEIVABLE, AssetType.POSITION, instrument, userHold.userUuid
+                )
+                add(RemoveFromBookedCommand(accountRepository, receivable.id, funding.shortfall))
+            }
+            add(AddToBookedCommand(accountRepository, venuePosition.id, fill.quantity))
+            add(RemoveFromBookedCommand(accountRepository, settlementCash.id, fill.amount))
+            add(AddToBookedCommand(accountRepository, userCash.id, fill.amount))
+            if (fill.fee > 0) {
+                add(RemoveFromBookedCommand(accountRepository, userCash.id, fill.fee))
+                add(AddToBookedCommand(accountRepository, feeIncome.id, fill.fee))
             }
         }
         transferInvoker.invoke(transferId, commands)
