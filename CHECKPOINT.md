@@ -953,3 +953,60 @@ alerting; comparing with the venue's and the bank's statements (chapter 9).
 Not yet done: the three queries by hand in psql against the VM database.
 
 Next: 1.5, the five isolation histories by hand.
+
+## 2026-11-26 — 1.5 Isolation histories, by hand on the ledger tables
+
+No code. Two psql windows against the VM database, on our own `accounts`, `transfers`,
+`ledger_entries` and `holds`. Each run is a history: an exact order of steps of two
+transactions. The check from 1.4 was run after each one.
+
+The 1.4 by-hand run is done too: the three queries, each rule broken inside
+`begin … rollback`.
+
+Withdrawals: Alice has 100, two withdrawals of 30 at the same moment, each one reads the
+balance, decides in the application, and writes the result back.
+
+| History | Change | What the second one experienced | End |
+|---|---|---|---|
+| H1 | read committed | waited at its update, then succeeded | booked 70, entries 40: one update lost, no error |
+| H2 | the read takes the lock (`for no key update`) | waited at the read, came back with the new number | correct |
+| H3 | repeatable read | error 40001 after the wait; `commit` answered `ROLLBACK` | correct, one refused |
+
+Holds: Alice has 100, two orders each want a hold of 60, each one reads, decides, inserts.
+
+| History | Change | What the second one experienced | End |
+|---|---|---|---|
+| H4 | read committed, and repeatable read | nothing | holds of 120 on a balance of 100 |
+| H4 | serializable | error 40001 at `commit` | correct |
+| H4b | both also add to `accounts.reserved`; read committed | waited, then the constraint `accounts_no_overdraft` failed | correct, by the constraint |
+| H4b | the same under repeatable read | error 40001 | correct |
+| H4b | the check inside the update (`where available >= 60`) | `UPDATE 0` | correct, a clean refusal |
+
+What they taught:
+
+- **A lock at the write is too late.** In H1 the second withdrawal waited, and still wrote a
+  number it had calculated before the wait. The mistake is made at the read.
+- **Read committed looks again after a wait; the application does not.** `set booked =
+  booked - 30 where available >= 30` is safe because the database re-reads the row and
+  re-checks the `where`. A number carried in the application's memory is never re-checked.
+  This is why the ledger works at read committed.
+- **A locking read returns the newest row.** When the decision cannot fit in one statement
+  (the fill splits an amount over three sources), lock at the read, then decide.
+- **Repeatable read stops a lost update, not write skew.** It notices a changed row. In H4
+  both wrote new rows, so there was nothing to notice.
+- **Write skew:** both read the same data, each decides from it, each writes something that
+  makes the other's decision false. Two fixes: serializable, or make both pass through one
+  shared row. `accounts.reserved` is that row in our ledger.
+- **40001 means: start the whole transaction again,** from the first read. Under
+  serializable even `commit` can fail. After any error the transaction is dead and `commit`
+  answers `ROLLBACK`.
+- **Three levels of defence, seen in H4b.** The conditional update refuses cleanly
+  (`UPDATE 0`, a 409). Without it the constraint still holds the line, as an error (a 500).
+  Without both, the books break silently and only the 1.4 check finds it.
+- **1.4 and 1.5 are one story.** The histories make the damage; the check finds it; the
+  balance can be rebuilt from the entries, because the entries are the truth.
+
+Not yet done: H5, serializable under load for five minutes, counting 40001. It needs the
+load generator pointed at the ledger over HTTP.
+
+Next: 1.6, `TransferBooked` as a Modulith event.
