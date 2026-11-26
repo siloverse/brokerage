@@ -1081,3 +1081,82 @@ transport); outbox backlog metrics, SQL spans and a relay span, when we do obser
 production.
 
 Next: the "break it" runs of chapter 1.
+
+## 2026-11-26 — Break it, drills 1 to 3, observed with the tools first
+
+The drills of chapter 1 are also where we learn observability. One loop for each: predict,
+break, look **only** at the tools (Grafana with Prometheus, Loki and Tempo; the RabbitMQ
+screen), write down what they showed and what they could not, then confirm with psql and
+`check.sql`, then fix the break or improve the signal.
+
+Before any drill: a baseline dashboard. Up, requests per second by status, errors, slowest
+request, connection pool, error log lines, start time; later also requests in flight and
+pool timeouts. You cannot recognise broken without having seen healthy.
+
+**Drill 1: the process is killed between the hold insert and the commit.**
+
+- The system: correct. No hold row, `reserved` unchanged. PostgreSQL rolled the transaction
+  back when the connection dropped. A retry with the same reference works.
+- The caller: `Empty reply from server`. It cannot know whether the hold happened.
+- The tools: `up` at 0 within one scrape (15 s). Every other line **ends**; it does not go
+  to zero. A dead app reports nothing, so a dashboard without `up` looks calm during an
+  outage. The logs go silent with an ordinary last line; `kill -9` leaves no last words.
+- Tracing loses the request that was in flight: a span is sent when it ends.
+- Improved: one log line at the start of every endpoint (`hold requested: reference=…`),
+  in the controller, before the transaction takes a connection. A request that died in
+  flight is now one "requested" line with nothing after it, and a trace id Tempo never got.
+
+**Drill 2: the same request twice, and five times at the same moment.**
+
+- The system: correct. One transfer, two entries, one outbox row per key; every copy gets
+  the same `transferUuid`. The winner of five was the second to arrive, not the first.
+- The tools: status 201 means booked, 200 means replayed, so the metric already tells them
+  apart. In Tempo only the winner's trace has the consumer span under it.
+- A trap: `rate` and `increase` answered 0 for seven real requests. A counter that appears
+  for the first time after a restart has no earlier point to compare with.
+
+**Drill 3: a transaction holds a lock on one account and never finishes.**
+
+Before the fix:
+
+- One caller's retries emptied the pool. Its curl gave up after 40 s; the server-side
+  request kept waiting and kept its connection. Three tries, three connections, pool of 3.
+- Then the whole ledger was down for 3 min 20 s, for every user, because of one row.
+- The outbox relay starved too: it takes its connection from the same pool.
+- Three deposits were booked minutes after their callers had given up.
+- Order of the signals: 201 rate and requests in flight within seconds; pool active 3 and
+  pending after 80 s; errors after 110 s; the slowest-request panel showed the real number
+  (279.6 s) only after it was over. A duration is recorded when a request ends, so the
+  worst requests report last.
+- The error said "no connection available". It pointed at the pool and hid the cause.
+
+The fix, two settings on the ledger's datasource: `lock_timeout` of 2 s on every connection
+(`connectionInitSql`), and 3 s instead of 30 s to wait for a connection.
+
+After the fix, same break: the locked account's requests fail after 2.0 s with "canceling
+statement due to lock timeout … in relation accounts"; the other user booked 90 deposits
+without interruption; pool active 1, pending 0; no pool timeouts; relay delay 1.1 s; nothing
+booked behind a caller's back. The damage stays where the problem is, and the error names
+the cause.
+
+Found on the way:
+
+- **The VM's clock ran 3 min 48 s ahead** (its time service was installed but not running).
+  Prometheus stamps points with the VM's time and the browser draws up to its own now, so
+  the newest four minutes were drawn in the future and looked like a lag. When the tools
+  disagree with what you know is happening, check the clocks first.
+- `rate(...[1m])` needs a minute to show a change in full; `irate` reacts within one or two
+  scrapes and is jumpy.
+- I predicted the deposit would block at the balance update. It blocks earlier, at
+  `ensureUserAccount`: the `insert … on conflict` waits for a row another transaction is
+  changing. Awais had it right.
+- Claude reads Grafana through a read-only (Viewer) service-account token.
+
+Still blind: anything inside PostgreSQL (locks, open transactions); the outbox backlog.
+
+Not yet done: a lock timeout answers 500, it should say 503 "try again" (Awais); alerts;
+PostgreSQL ending sessions that sit idle in a transaction; the relay on its own pool.
+
+Next: drill 4 (the event delivered twice), drill 5 (RabbitMQ down), drill 6 (a consumer
+that throws).
+

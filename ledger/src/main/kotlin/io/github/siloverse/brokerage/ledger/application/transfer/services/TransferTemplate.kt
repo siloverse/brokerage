@@ -6,6 +6,7 @@ import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.TransferRepository
 import io.github.siloverse.identifiers.core.UuidV7
 import io.github.siloverse.messaging.core.api.TransactionAwareAsynchronousBus
+import org.slf4j.LoggerFactory
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
@@ -14,6 +15,7 @@ abstract class TransferTemplate<I, P>(
     private val transferRepository: TransferRepository,
     private val bus: TransactionAwareAsynchronousBus
 ) {
+    private val logger = LoggerFactory.getLogger(javaClass)
 
     // the template method
     fun transfer(instruction: I): TransferReceipt {
@@ -21,12 +23,18 @@ abstract class TransferTemplate<I, P>(
         val key = idempotencyKey(instruction)
 
         val transferUuid = UuidV7.next()
+        val holdId = holdId(prepared)
         val transferId = transferRepository.insert(
             uuid = transferUuid,
             kind = kind,
             idempotencyKey = key,
-            holdId = holdId(prepared),
-        ) ?: return TransferReceipt(transferRepository.findUuidByKey(key), replayed = true)
+            holdId = holdId,
+        )
+
+        if (transferId == null) {
+            logger.info("Transfer is already created { TransferInstruction = $instruction")
+            return TransferReceipt(transferRepository.findUuidByKey(key), replayed = true)
+        }
 
         book(instruction, prepared, transferId)
         bus.publish(

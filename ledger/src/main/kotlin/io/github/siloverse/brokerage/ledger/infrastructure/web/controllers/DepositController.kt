@@ -4,6 +4,7 @@ import io.github.siloverse.brokerage.ledger.application.deposit.model.DepositIns
 import io.github.siloverse.brokerage.ledger.application.deposit.services.DepositFundsService
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.DepositRequest
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.DepositResponse
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
@@ -18,11 +19,14 @@ import java.util.UUID
 @RequestMapping("/api/ledger/deposits")
 class DepositController(private val depositFundsService: DepositFundsService) {
 
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     @PostMapping
     fun deposit(
         @RequestHeader("Idempotency-Key") idempotencyKey: UUID,
         @RequestBody request: DepositRequest,
     ): ResponseEntity<DepositResponse> {
+        logger.info("deposit requested: key={} user={}", idempotencyKey, request.userUuid)
         val receipt = depositFundsService.transfer(
             DepositInstruction(
                 idempotencyKey = idempotencyKey,
