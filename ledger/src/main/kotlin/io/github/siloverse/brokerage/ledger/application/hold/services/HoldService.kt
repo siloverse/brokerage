@@ -10,6 +10,7 @@ import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
 import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountRepository
 import io.github.siloverse.brokerage.ledger.domain.hold.repositories.HoldRepository
 import io.github.siloverse.identifiers.core.UuidV7
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
@@ -19,6 +20,8 @@ class HoldService(
     private val accountRepository: AccountRepository,
     private val holdRepository: HoldRepository
 ) {
+
+    private val logger = LoggerFactory.getLogger(javaClass)
 
     @Transactional(transactionManager = "ledgerTransactionManager")
     fun hold(holdInstruction: HoldInstruction): HoldReceipt {
@@ -38,6 +41,7 @@ class HoldService(
         )
 
         if (holdId == null) {
+            logger.info("Hold is already created { HoldInstruction = $holdInstruction")
             val existingHoldUuid = holdRepository.getUuidByReference(holdInstruction.reference)
             return HoldReceipt(
                 holdUuid = existingHoldUuid,

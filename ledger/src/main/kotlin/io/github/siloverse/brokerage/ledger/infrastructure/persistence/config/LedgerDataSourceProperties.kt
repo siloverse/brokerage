@@ -8,4 +8,6 @@ data class LedgerDataSourceProperties(
     val username: String,
     val password: String,
     val poolSize: Int = 3,
+    val connectionTimeoutMillis: Long = 3_000,
+    val lockTimeoutMillis: Long = 2_000,
 )

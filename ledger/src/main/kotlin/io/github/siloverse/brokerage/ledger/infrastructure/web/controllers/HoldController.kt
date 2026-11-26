@@ -6,6 +6,7 @@ import io.github.siloverse.brokerage.ledger.application.hold.services.HoldServic
 import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.HoldRequest
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.HoldResponse
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
@@ -20,8 +21,11 @@ import java.util.UUID
 @RequestMapping("/api/ledger/holds")
 class HoldController(private val holdService: HoldService) {
 
+    private val logger = LoggerFactory.getLogger(javaClass)
+
     @PostMapping
     fun hold(@RequestBody request: HoldRequest): ResponseEntity<HoldResponse> {
+        logger.info("hold requested: reference={} user={}", request.reference, request.userUuid)
         val receipt = holdService.hold(
             HoldInstruction(
                 reference = request.reference,
@@ -37,6 +41,7 @@ class HoldController(private val holdService: HoldService) {
 
     @PostMapping("/{reference}/release")
     fun release(@PathVariable reference: UUID): ResponseEntity<HoldResponse> {
+        logger.info("hold release requested: reference={}", reference)
         val released = holdService.releaseHold(reference)
         return ResponseEntity.ok(HoldResponse(released.holdUuid))
     }
