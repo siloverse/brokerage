@@ -1154,8 +1154,14 @@ Found on the way:
 
 Still blind: anything inside PostgreSQL (locks, open transactions); the outbox backlog.
 
-Not yet done: a lock timeout answers 500, it should say 503 "try again" (Awais); alerts;
-PostgreSQL ending sessions that sit idle in a transaction; the relay on its own pool.
+Added after the drill: "busy" is not "broken". A lock timeout (SQL state 55P03) and "no free
+connection" are answered with **503** and `Retry-After: 1`, by one `LedgerBusyAdvice` for
+all ledger endpoints. Spring has no named exception for 55P03; it arrives as
+`UncategorizedSQLException`, so the handler reads the SQL state and rethrows anything else.
+The refused request leaves nothing behind and the same key works on the retry.
+
+Not yet done: alerts; PostgreSQL ending sessions that sit idle in a transaction; the relay
+on its own pool; a retry inside the app for a short lock.
 
 Next: drill 4 (the event delivered twice), drill 5 (RabbitMQ down), drill 6 (a consumer
 that throws).
