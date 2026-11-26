@@ -14,9 +14,11 @@ dependencies {
     runtimeOnly(local.postgresql)
     implementation(libs.bundles.spring.web)
     implementation(kotlin("reflect"))
+    implementation(local.siloverse.messaging.core)
 
     testImplementation(local.spring.boot.starter.test)
     testImplementation(local.mockito.kotlin)
+    testImplementation(local.siloverse.messaging.spring)
     testImplementation(local.spring.boot.webmvc.test)
     testImplementation(local.spring.boot.testcontainers)
     testImplementation(libs.testcontainers.postgresql)

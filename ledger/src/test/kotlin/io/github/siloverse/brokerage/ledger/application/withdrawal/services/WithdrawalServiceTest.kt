@@ -1,6 +1,8 @@
 package io.github.siloverse.brokerage.ledger.application.withdrawal.services
 
 import io.github.siloverse.brokerage.ledger.BaseUnitTest
+import io.github.siloverse.brokerage.ledger.api.messages.events.TransferBooked
+import io.github.siloverse.messaging.core.api.TransactionAwareAsynchronousBus
 import io.github.siloverse.brokerage.ledger.application.withdrawal.model.WithdrawalInstruction
 import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
@@ -41,11 +43,14 @@ class WithdrawalServiceTest : BaseUnitTest() {
     @Mock
     lateinit var ledgerEntryRepository: LedgerEntryRepository
 
+    @Mock
+    lateinit var bus: TransactionAwareAsynchronousBus
+
     lateinit var service: WithdrawalService
 
     @BeforeEach
     fun createTheServiceWithARealInvoker() {
-        service = WithdrawalService(transferRepository, accountRepository, TransferInvoker(ledgerEntryRepository))
+        service = WithdrawalService(transferRepository, accountRepository, TransferInvoker(ledgerEntryRepository), bus)
     }
 
     private val user = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -92,6 +97,16 @@ class WithdrawalServiceTest : BaseUnitTest() {
     }
 
     @Test
+    fun `a booked withdrawal is announced once, with the uuid of its transfer`() {
+        aNewKey()
+        whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(1)
+
+        val receipt = service.transfer(withdrawalInstruction)
+
+        verify(bus).publish(TransferBooked(receipt.transferUuid, "WITHDRAWAL"))
+    }
+
+    @Test
     fun `too little available is refused and the settlement account is not touched`() {
         aNewKey()
         whenever(accountRepository.takeFromAvailable(10L, 5_000)).thenReturn(0)
@@ -101,6 +116,7 @@ class WithdrawalServiceTest : BaseUnitTest() {
         assertTrue(error.message!!.contains(user.toString()))
         assertTrue(error.message!!.contains(userAccountUuid.toString()))
         verify(accountRepository, never()).addToBooked(any(), any())
+        verifyNoInteractions(bus)
     }
 
     @Test
@@ -147,6 +163,6 @@ class WithdrawalServiceTest : BaseUnitTest() {
 
         assertTrue(receipt.replayed)
         assertEquals(firstTransferUuid, receipt.transferUuid)
-        verifyNoInteractions(accountRepository, ledgerEntryRepository)
+        verifyNoInteractions(accountRepository, ledgerEntryRepository, bus)
     }
 }

@@ -9,6 +9,7 @@ import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountR
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.TransferRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.services.TransferInvoker
+import io.github.siloverse.messaging.core.api.TransactionAwareAsynchronousBus
 import org.springframework.stereotype.Service
 import java.util.UUID
 
@@ -17,7 +18,8 @@ class WithdrawalService(
     transferRepository: TransferRepository,
     private val accountRepository: AccountRepository,
     private val transferInvoker: TransferInvoker,
-) : TransferTemplate<WithdrawalInstruction, Unit>(transferRepository) {
+    bus: TransactionAwareAsynchronousBus,
+) : TransferTemplate<WithdrawalInstruction, Unit>(transferRepository, bus) {
 
     override val kind: TransferKind = TransferKind.WITHDRAWAL
 

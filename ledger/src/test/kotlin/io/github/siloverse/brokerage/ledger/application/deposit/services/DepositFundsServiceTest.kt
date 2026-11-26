@@ -1,6 +1,8 @@
 package io.github.siloverse.brokerage.ledger.application.deposit.services
 
 import io.github.siloverse.brokerage.ledger.BaseUnitTest
+import io.github.siloverse.brokerage.ledger.api.messages.events.TransferBooked
+import io.github.siloverse.messaging.core.api.TransactionAwareAsynchronousBus
 import io.github.siloverse.brokerage.ledger.application.deposit.model.DepositInstruction
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
 import io.github.siloverse.brokerage.ledger.domain.account.model.enums.AssetType
@@ -23,6 +25,7 @@ import org.mockito.kotlin.eq
 import org.mockito.kotlin.inOrder
 import org.mockito.kotlin.isNull
 import org.mockito.kotlin.verify
+import org.mockito.kotlin.never
 import org.mockito.kotlin.verifyNoInteractions
 import org.mockito.kotlin.verifyNoMoreInteractions
 import org.mockito.kotlin.whenever
@@ -39,11 +42,14 @@ class DepositFundsServiceTest : BaseUnitTest() {
     @Mock
     lateinit var ledgerEntryRepository: LedgerEntryRepository
 
+    @Mock
+    lateinit var bus: TransactionAwareAsynchronousBus
+
     lateinit var service: DepositFundsService
 
     @BeforeEach
     fun createTheServiceWithARealInvoker() {
-        service = DepositFundsService(transferRepository, accountRepository, TransferInvoker(ledgerEntryRepository))
+        service = DepositFundsService(transferRepository, accountRepository, TransferInvoker(ledgerEntryRepository), bus)
     }
 
     private val user = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -87,6 +93,15 @@ class DepositFundsServiceTest : BaseUnitTest() {
     }
 
     @Test
+    fun `a booked deposit is announced once, with the uuid of its transfer`() {
+        aNewKey()
+
+        val receipt = service.transfer(depositInstruction)
+
+        verify(bus).publish(TransferBooked(receipt.transferUuid, "DEPOSIT"))
+    }
+
+    @Test
     fun `the transfer is written before any entry or balance`() {
         aNewKey()
 
@@ -108,6 +123,6 @@ class DepositFundsServiceTest : BaseUnitTest() {
 
         assertTrue(receipt.replayed)
         assertEquals(firstTransferUuid, receipt.transferUuid)
-        verifyNoInteractions(accountRepository, ledgerEntryRepository)
+        verifyNoInteractions(accountRepository, ledgerEntryRepository, bus)
     }
 }

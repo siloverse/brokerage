@@ -2,6 +2,9 @@ package io.github.siloverse.brokerage.ledger.domain.transfer.funding
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import org.mockito.Answers
+import org.mockito.kotlin.UseConstructor
+import org.mockito.kotlin.mock
 import org.junit.jupiter.api.assertThrows
 
 class FundingChainTest {
@@ -85,10 +88,7 @@ class FundingChainTest {
 
     @Test
     fun `a chain that ends before everything is funded fails loudly`() {
-        val endsTooEarly = object : FundingHandler() {
-            override fun take(wanted: Long) = 0L
-            override fun record(funding: Funding, taken: Long) = funding
-        }
+        val endsTooEarly = mock<FundingHandler>(useConstructor = UseConstructor.parameterless(), defaultAnswer = Answers.CALLS_REAL_METHODS)
 
         assertThrows<IllegalStateException> { endsTooEarly.fund(100) }
     }

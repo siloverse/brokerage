@@ -18,6 +18,8 @@ dependencies {
     implementation(libs.bundles.spring.web)
     implementation(libs.bundles.siloverse.observability)
 
+    implementation(local.bundles.siloverse.messaging)
+
     testImplementation(local.spring.modulith.starter.test)
     testImplementation(local.archunit.junit5)
 }

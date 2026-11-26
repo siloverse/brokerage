@@ -10,6 +10,7 @@ import io.github.siloverse.brokerage.ledger.domain.transfer.model.Fill
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.TransferRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.strategy.FillStrategy
+import io.github.siloverse.messaging.core.api.TransactionAwareAsynchronousBus
 import org.springframework.stereotype.Service
 
 @Service
@@ -17,7 +18,9 @@ class FillService(
     private val holdRepository: HoldRepository,
     transferRepository: TransferRepository,
     fillStrategies: List<FillStrategy>,
-) : TransferTemplate<FillInstruction, BookableFill>(transferRepository) {
+    bus: TransactionAwareAsynchronousBus,
+
+) : TransferTemplate<FillInstruction, BookableFill>(transferRepository, bus) {
 
     private val strategies = fillStrategies.associateBy { it.assetType }
 

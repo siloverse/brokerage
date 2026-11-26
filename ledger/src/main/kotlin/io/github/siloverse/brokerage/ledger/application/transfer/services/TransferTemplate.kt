@@ -1,15 +1,18 @@
 package io.github.siloverse.brokerage.ledger.application.transfer.services
 
+import io.github.siloverse.brokerage.ledger.api.messages.events.TransferBooked
 import io.github.siloverse.brokerage.ledger.application.transfer.model.TransferReceipt
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.TransferRepository
 import io.github.siloverse.identifiers.core.UuidV7
+import io.github.siloverse.messaging.core.api.TransactionAwareAsynchronousBus
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
 @Transactional(transactionManager = "ledgerTransactionManager")
 abstract class TransferTemplate<I, P>(
     private val transferRepository: TransferRepository,
+    private val bus: TransactionAwareAsynchronousBus
 ) {
 
     // the template method
@@ -26,7 +29,12 @@ abstract class TransferTemplate<I, P>(
         ) ?: return TransferReceipt(transferRepository.findUuidByKey(key), replayed = true)
 
         book(instruction, prepared, transferId)
-
+        bus.publish(
+            TransferBooked(
+                transferUuid = transferUuid,
+                kind = kind.name
+            )
+        )
         return TransferReceipt(transferUuid, replayed = false)
     }
 

@@ -100,7 +100,14 @@ Kotlin cannot write `package-info`, so that one file is Java. `ModularityTest` i
 then fails any import of `application`, `domain`, or `infrastructure` from another module.
 `LayersTest` adds the rules inside a module: `domain` imports no other layer and no
 framework; `application` never imports `infrastructure`; `api` depends only on `api`,
-the JDK, and Kotlin.
+the JDK, Kotlin, and two packages of the messaging library: `messaging.core.api` (the
+`Event` marker an integration event must carry) and `messaging.core.naming` (the wire
+names). Nothing else of that library, and no Spring.
+
+Modulith does not include sub-packages in a named interface. When `api` is split
+(`ledger.api.messages`, `ledger.api.messages.events`), each sub-package gets its own
+`package-info.java` with the same `@NamedInterface("api")`; Modulith merges them into one
+interface. The annotation's `propagate` switch is about something else and does not do this.
 
 Kotlin `internal` is used where it does not fight the tests. The Venue port and its FIX
 adapter stay public because the `venue` app's test runs the contract against them from
@@ -117,6 +124,8 @@ another Gradle module. The architecture tests are the wall; `internal` is a cour
 - Gradle dependencies are explicit and acyclic. `app` depends on every module; modules
   depend on each other only when the direction is intentional.
 - `app` holds startup, configuration, wiring, and cross-module adapters. No business rules.
+  Its classes live under `io.github.siloverse.brokerage.app` (`app.config`,
+  `app.consumers`), so Modulith sees one module `app` and not one per package.
 
 ## 4. Who owns a contract
 
@@ -134,6 +143,21 @@ contract into its own model. Messages are never pooled into a generic `shared` o
 `messages` project just because several modules use them.
 
 ## 5. Cross-module communication
+
+Integration events travel through the siloverse messaging library, not through in-process
+Spring events:
+
+- The publisher calls `TransactionAwareAsynchronousBus.publish` inside its own transaction.
+  That only inserts a row into `messaging_outbox`, on the module's own connection, so the
+  event exists exactly when the business change does.
+- The relay sends unpublished rows to RabbitMQ; a consumer in another module is a method
+  marked `@Consumer(id = ...)`. The id names the queue and must not be renamed.
+- Delivery is at least once. A consumer that changes state must cope with a repeat
+  (`dedup = true` and an inbox table in its own database).
+- The event class and its wire name are declared in the publisher's `api`. The wire name is
+  written by hand (`ledger.transfer-booked`), never derived from the class name.
+- The broker wiring is in `app.config`. Today there is one outbox, in the ledger's schema,
+  because the library takes one `JdbcTemplate`.
 
 - A synchronous call to another module's `api` when an immediate result is needed. A
   instruction can be a plain Kotlin object handed to a function; no bus, no broker.

@@ -10,14 +10,30 @@ spring:
       - org.springframework.boot.jdbc.autoconfigure.JdbcTemplateAutoConfiguration
       - org.springframework.boot.jdbc.autoconfigure.JdbcClientAutoConfiguration
 management:
-  endpoints:
-    web:
-      exposure:
-        include: health,prometheus,info
   otlp:
     metrics:
       export:
         enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: true
+  opentelemetry:
+    logging:
+      export:
+        otlp:
+          endpoint: https://otel.macgrant-platform.test/v1/logs
+    tracing:
+      export:
+        otlp:
+          endpoint: https://otel.macgrant-platform.test/v1/traces
+  tracing:
+    sampling:
+      probability: 1.0
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
 
 brokerage:
   ledger:
@@ -25,3 +41,11 @@ brokerage:
       url: jdbc:postgresql://postgres.macgrant-platform.test:5432/brokerage
       username: ledger
       password: ledger
+
+messaging:
+  rabbitmq:
+    host: rabbitmq.macgrant-platform.test
+    port: 5672
+    username: admin
+    password: admin
+    vhost: siloverse
