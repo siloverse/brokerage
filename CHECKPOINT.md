@@ -1010,3 +1010,74 @@ Not yet done: H5, serializable under load for five minutes, counting 40001. It n
 load generator pointed at the ledger over HTTP.
 
 Next: 1.6, `TransferBooked` as a Modulith event.
+
+## 2026-11-26 — 1.6 The outbox: `TransferBooked` through the messaging library
+
+The ledger now announces every booked transfer. The plan said "a Modulith event"; we used
+our own messaging library instead. One outbox on the platform, not two, and the library has
+the inbox for duplicates, which Modulith's registry has not.
+
+The problem the outbox solves: a transfer and its announcement are two things. Commit first
+and the process may die before the event is sent. Send first and the commit may fail. So the
+event is written as a row, in the same transaction as the transfer. One commit, both or
+neither.
+
+- **The event.** `TransferBooked(transferUuid, kind)` in `ledger.api.messages.events`. Thin
+  on purpose: everything in `api` is a promise. `kind` is text, not the domain enum. The
+  wire name `ledger.transfer-booked` is written by hand.
+- **Where it is published.** One line in `TransferTemplate`, after `book`. It covers
+  deposits, withdrawals and fills. A replayed key returns earlier, so it announces nothing;
+  a refused transfer rolls the row back with everything else.
+- **The table.** Migration V4, `messaging_outbox`, the library's own definition. It sits in
+  the ledger's schema and is written through a `JdbcTemplate` on the ledger's datasource.
+  That is the whole trick: the insert joins the transaction `ledgerTransactionManager`
+  opened for the transfer.
+- **The way out.** The relay polls once a second, sends each row to RabbitMQ, and stamps
+  `published_at` when the broker confirms. Measured by hand: between 40 ms and 0.9 s.
+- **The way in.** `TransferBookedConsumer` in `portfolio`, `@Consumer(id =
+  "portfolio-transfer-booked")`. It only logs. The queue is named after the id, with a retry
+  queue and a dead-letter queue next to it.
+- **Wiring.** `app.config.BrokerageMessagingConfiguration`: two connections (publish and
+  consume, so a slowed publisher cannot starve the consumers), the topology declared at
+  startup, the retry policy. The app does not start without RabbitMQ now.
+
+Observability, switched on in the same piece:
+
+- Logs and traces go to the VM by OTLP; metrics are still scraped by Prometheus.
+- Three files: endpoints and 100 percent sampling in `application.yml`, a
+  `logback-spring.xml` with the OTel appender, and one bean that installs the appender.
+  Without that last call the appender drops every line and says nothing.
+- **One trace across the outbox and the broker.** The request's trace context is stored in
+  the outbox row's headers; the consumer continues it. Seen in Grafana: the HTTP request for
+  35 ms, a gap, then the consumer for 1 ms, under one trace id. The caller had its answer
+  before the consumer started. That is what asynchronous looks like on a timeline.
+- The trace has two spans. SQL statements and the relay's send are not recorded.
+
+Architecture rules that moved:
+
+- `api` may depend on two packages of the messaging library (the `Event` marker, the wire
+  names), nothing else.
+- A sub-package of `api` needs its own `package-info.java` with `@NamedInterface("api")`.
+  I first claimed the annotation's `propagate` switch does this. It does not; the
+  architecture test showed it at once.
+- `app`'s classes live under `brokerage.app`, so Modulith sees one module.
+
+Tests: mocks first. The anonymous `Command` and `FundingHandler` in the tests became
+Mockito mocks; the one class a mock cannot replace (a subclass of the abstract template)
+moved to its own file. New: each service announces once, a replay and a refusal announce
+nothing; on the real database a deposit leaves one unpublished row, the same key twice
+leaves one row, a refused withdrawal leaves none.
+
+Limits, known:
+
+- One outbox per application: the library takes one `JdbcTemplate`. A second module with
+  its own database cannot publish yet.
+- No inbox yet. It lives in the consumer's database and `portfolio` has none. The first
+  consumer that changes state needs it.
+- No automatic test runs relay, broker and consumer together. Proven by hand.
+
+Planned, not built: a `messaging-testing` module (outbox assertions, an in-memory
+transport); outbox backlog metrics, SQL spans and a relay span, when we do observability for
+production.
+
+Next: the "break it" runs of chapter 1.

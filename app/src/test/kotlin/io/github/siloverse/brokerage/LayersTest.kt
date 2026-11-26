@@ -32,7 +32,10 @@ class LayersTest {
     @Test
     fun `api exposes only its own types`() {
         classes().that().resideInAPackage("$base..api..")
-            .should().onlyDependOnClassesThat().resideInAnyPackage("$base..api..", "java..", "kotlin..", "kotlinx..", "org.jetbrains..", "org.springframework.modulith..")
+            .should().onlyDependOnClassesThat().resideInAnyPackage(
+                "$base..api..", "java..", "kotlin..", "kotlinx..", "org.jetbrains..", "org.springframework.modulith..",
+                "io.github.siloverse.messaging.core.api..", "io.github.siloverse.messaging.core.naming..",
+            )
             .allowEmptyShould(true)
             .check(classes)
     }

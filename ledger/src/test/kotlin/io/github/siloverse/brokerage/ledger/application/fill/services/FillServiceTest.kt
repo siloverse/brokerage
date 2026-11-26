@@ -1,6 +1,8 @@
 package io.github.siloverse.brokerage.ledger.application.fill.services
 
 import io.github.siloverse.brokerage.ledger.BaseUnitTest
+import io.github.siloverse.brokerage.ledger.api.messages.events.TransferBooked
+import io.github.siloverse.messaging.core.api.TransactionAwareAsynchronousBus
 import io.github.siloverse.brokerage.ledger.application.fill.model.FillInstruction
 import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
 import io.github.siloverse.brokerage.ledger.domain.account.model.AccountIdentifier
@@ -48,6 +50,9 @@ class FillServiceTest : BaseUnitTest() {
     @Mock
     lateinit var ledgerEntryRepository: LedgerEntryRepository
 
+    @Mock
+    lateinit var bus: TransactionAwareAsynchronousBus
+
     lateinit var service: FillService
 
     @BeforeEach
@@ -59,7 +64,8 @@ class FillServiceTest : BaseUnitTest() {
             listOf(
                 BuyFillStrategy(holdRepository, accountRepository, transferInvoker),
                 SellFillStrategy(holdRepository, accountRepository, transferInvoker),
-            )
+            ),
+            bus,
         )
     }
 
@@ -150,6 +156,15 @@ class FillServiceTest : BaseUnitTest() {
     }
 
     @Test
+    fun `a booked fill is announced once, with the uuid of its transfer`() {
+        aBuyTheHoldCovers()
+
+        val receipt = service.transfer(instruction)
+
+        verify(bus).publish(TransferBooked(receipt.transferUuid, "FILL"))
+    }
+
+    @Test
     fun `the transfer is written before the hold is locked or any account is touched`() {
         aBuyTheHoldCovers()
 
@@ -168,7 +183,7 @@ class FillServiceTest : BaseUnitTest() {
         val error = assertThrows<HoldNotFoundException> { service.transfer(instruction) }
 
         assertTrue(error.message!!.contains(reference.toString()))
-        verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
+        verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository, bus)
     }
 
     @Test
@@ -184,7 +199,7 @@ class FillServiceTest : BaseUnitTest() {
         assertEquals(firstTransferUuid, receipt.transferUuid)
         verify(holdRepository, never()).lockRest(any())
         verify(holdRepository, never()).consumeHold(any(), any())
-        verifyNoInteractions(accountRepository, ledgerEntryRepository)
+        verifyNoInteractions(accountRepository, ledgerEntryRepository, bus)
     }
 
     @Test
@@ -193,7 +208,7 @@ class FillServiceTest : BaseUnitTest() {
 
         assertThrows<IllegalArgumentException> { service.transfer(instruction) }
 
-        verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
+        verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository, bus)
     }
 
     @Test
@@ -202,6 +217,6 @@ class FillServiceTest : BaseUnitTest() {
 
         assertThrows<IllegalArgumentException> { service.transfer(instruction) }
 
-        verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository)
+        verifyNoInteractions(transferRepository, accountRepository, ledgerEntryRepository, bus)
     }
 }

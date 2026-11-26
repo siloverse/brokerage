@@ -9,6 +9,7 @@ import io.github.siloverse.brokerage.ledger.domain.account.repositories.AccountR
 import io.github.siloverse.brokerage.ledger.domain.transfer.model.TransferKind
 import io.github.siloverse.brokerage.ledger.domain.transfer.repositories.TransferRepository
 import io.github.siloverse.brokerage.ledger.domain.transfer.services.TransferInvoker
+import io.github.siloverse.messaging.core.api.TransactionAwareAsynchronousBus
 import org.springframework.stereotype.Service
 import java.util.*
 
@@ -16,8 +17,9 @@ import java.util.*
 class DepositFundsService(
     transferRepository: TransferRepository,
     private val accountRepository: AccountRepository,
-    private val transferInvoker: TransferInvoker
-) : TransferTemplate<DepositInstruction, Unit>(transferRepository) {
+    private val transferInvoker: TransferInvoker,
+    bus: TransactionAwareAsynchronousBus,
+) : TransferTemplate<DepositInstruction, Unit>(transferRepository, bus) {
 
     override val kind: TransferKind = TransferKind.DEPOSIT
 

@@ -4,6 +4,7 @@ archunit = "1.4.1"
 hdrhistogram = "2.2.2"
 siloverse-identifiers = "0.1.0"
 mockito-kotlin = "6.4.0"
+siloverse-messaging = "1.0.12"
 
 [libraries]
 spring-modulith-bom = { module = "org.springframework.modulith:spring-modulith-bom", version.ref = "spring-modulith" }
@@ -23,3 +24,13 @@ spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-star
 mockito-kotlin = { module = "org.mockito.kotlin:mockito-kotlin", version.ref = "mockito-kotlin" }
 spring-boot-webmvc-test = { module = "org.springframework.boot:spring-boot-webmvc-test" }
 spring-boot-testcontainers = { module = "org.springframework.boot:spring-boot-testcontainers" }
+siloverse-messaging-core = { module = "io.github.siloverse:messaging-core", version.ref = "siloverse-messaging" }
+siloverse-messaging-rabbitmq = { module = "io.github.siloverse:messaging-rabbitmq", version.ref = "siloverse-messaging" }
+siloverse-messaging-spring = { module = "io.github.siloverse:messaging-spring", version.ref = "siloverse-messaging" }
+
+[bundles]
+siloverse-messaging = [
+    "siloverse-messaging-core",
+    "siloverse-messaging-rabbitmq",
+    "siloverse-messaging-spring"
+]
