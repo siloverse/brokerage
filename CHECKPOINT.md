@@ -1245,3 +1245,42 @@ Next: one iteration on the messaging library ("outbox hardening"): how it owns i
 the index, backlog metrics, a batch limit, retention, and the findings of drills 4 to 6.
 Then the load generator over HTTP, for H5 and the measurements.
 
+## 2026-11-27 — Measure: the first number for the ledger
+
+The load generator from chapter 0 can now drive the ledger over HTTP, and chapter 1 has its
+number: **the p99 of a hold at 40 requests a second is about 20 ms.** The pass mark is 100.
+
+- **The target.** `LedgerHttpTarget`, next to the FIX venue target. It maps the order flow
+  onto the ledger: an order is a hold on cash, a cancel is a release. So the baseline
+  profile runs unchanged, 40 holds and 8 releases a second, and nothing in the scheduler,
+  the profile or the report had to change. The generator only speaks HTTP; it has no
+  dependency on the ledger's code.
+- **Open loop.** The generator keeps its timetable whether or not the last request was
+  answered, and measures from the scheduled send time. Our curl loops in the drills waited
+  for each answer, so they slowed down with the system. Fine for watching, useless for
+  measuring.
+- **Run twice.** Cold: p99 29.3 ms. Warm, three minutes later: 19.8 ms. The first run pays
+  for the JVM compiling and for connections opening.
+- **Two clocks.** Generator p99 19.8 ms, server-side histogram 16.4 ms for the same minute.
+  The server does not see the network or the client, and its percentiles are estimated from
+  buckets. The generator's number is the claim; the dashboard's is for watching.
+- **The pool was 8 % busy.** A transfer holds its connection for about 5 ms, so one
+  connection serves about 200 requests a second. Drill 3 emptied a pool of 3 because
+  connections were held for minutes, not because 3 is small. How long a connection is held
+  matters far more than how many there are.
+
+The dashboard, built by hand and corrected panel by panel:
+
+- `a and b` in PromQL does not draw both. It returns `a` where `b` exists. The pool panel
+  had never shown `pending`.
+- A panel without a chosen visualization draws nothing and says nothing.
+- "No data" and "0" can both mean healthy: an error line only exists after the first error.
+- Percentiles need histogram buckets, which the app did not export. Switching them on
+  (`percentiles-histogram`) also renamed the in-flight metric (`…_gcount`).
+- The in-flight count included Prometheus' own scrape, so it never read below 1.
+- `increase` over a window stretches what it saw to the window's edges; it reported 2,806
+  holds for a run of 2,400.
+
+Not yet done: the same run on one hot account and at five times the load; H5, the ledger at
+serializable.
+
