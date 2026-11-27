@@ -1166,3 +1166,82 @@ on its own pool; a retry inside the app for a short lock.
 Next: drill 4 (the event delivered twice), drill 5 (RabbitMQ down), drill 6 (a consumer
 that throws).
 
+## 2026-11-27 — Break it, drills 4 to 6: the outbox, the broker and the consumer
+
+Same loop as before: predict, break, look at the tools only, then the truth. These three
+changed no code in the brokerage. What they found belongs to the messaging library.
+
+**Drill 4: the event delivered twice.** An outbox row's `published_at` was set back to
+null, which is the state after a crash between "sent" and "stamped".
+
+- The relay sent the row again: same message id, 138 s after the first time. The consumer
+  ran twice.
+- In Loki: two `transfer booked` lines with one trace id. In Tempo: the original trace now
+  has the consumer span twice, and claims to be 138 s long. The trace context is stored in
+  the row, so every delivery continues the first request's trace.
+- On the dashboard: nothing. A duplicate is just one more successful delivery.
+- No fix yet. Deduplication needs an inbox in the consumer's own database, and `portfolio`
+  has none. Harmless today because the consumer only logs. At-least-once is a contract with
+  two sides: the publisher delivers, the consumer makes a repeat change nothing.
+
+**Drill 5: RabbitMQ down for three and a half minutes, under load.**
+
+- Every deposit still answered 201, the slowest in 0.12 s. Callers noticed nothing.
+- 337 events waited in `messaging_outbox`, the oldest for 219 s. When the broker came back,
+  376 were delivered in two seconds: none lost, none twice, in the order they were booked.
+- The app reconnected by itself; the RabbitMQ client heals its own connections.
+- In the tools: the relay's warning once a second, the client's recovery errors, a trace
+  with a 188 s gap between the request and the consumer.
+- Not in the tools: how many events waited, and for how long. Only SQL could say.
+
+**Drill 6: a consumer that throws** for one kind of event (a temporary line, removed).
+
+- The withdrawal answered 201. The consumer was tried 3 times, 10 s apart, then the message
+  was parked in the dead-letter queue with the cause in a header. `maxAttempts = 3` counts
+  all deliveries: one try, two retries.
+- Deposits behind it were consumed in between. The failing message gives up its place in
+  the order.
+- How the delay works: no timer in the app. A rejected message is dead-lettered from the
+  main queue into a retry queue that nobody reads and whose messages live 10 s; when that
+  time is over RabbitMQ dead-letters it back to the main queue. The attempt number is read
+  from the `x-death` header the broker maintains.
+- In Tempo: one trace with the request and three failed consume attempts. The best view of
+  all six drills.
+- Not good: the "failed attempt" and "parked in DLQ" log lines carry no trace id; each
+  failed attempt is recorded as two spans; nothing counts parked messages; nothing sends a
+  parked message again.
+- The business view: the ledger booked a withdrawal that `portfolio` never processed. Each
+  module is fine, together they disagree, and only the dead-letter queue knows.
+
+Found on the way:
+
+- The relay loads every pending row in one query without a limit, and that query scans the
+  whole table every second (45,000 rows, never cleaned). The consumer is safe (prefetch 1)
+  and the broker sets the publishing pace (one confirm per message); the risk is memory in
+  our own app.
+- I was about to add an index and a backlog metric to the ledger. Awais stopped it: the
+  outbox table is the library's, and so are its index, its metrics and its cleanup. A user
+  of a library should not have to know the library's queries. The test: would every user
+  need exactly the same thing? Then it belongs in the library.
+- The VM's clock drifted again, 23 s ahead, and its time service was off again.
+
+The six drills in one table:
+
+| # | Break | System | Outcome |
+|---|---|---|---|
+| 1 | process killed in the middle of a hold | correct | request logs |
+| 2 | same request twice | correct | nothing needed |
+| 3 | a lock never released | whole ledger down | lock timeout, 503 |
+| 4 | event delivered twice | harmless today | waits for portfolio's database |
+| 5 | broker down | correct | backlog metric, in the library |
+| 6 | consumer throws | correct | five findings for the library |
+
+What observability taught, across all six: metrics say that something is wrong, logs say
+what, a trace says where in one request. A number recorded at the end of a request reports
+the worst requests last. A dead process reports nothing, so "no data" is not "zero". And
+after each drill the useful question was: what could the tools not show?
+
+Next: one iteration on the messaging library ("outbox hardening"): how it owns its tables,
+the index, backlog metrics, a batch limit, retention, and the findings of drills 4 to 6.
+Then the load generator over HTTP, for H5 and the measurements.
+
