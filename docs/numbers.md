@@ -200,3 +200,5 @@ Append one row each time a measurement replaces an estimate.
 | 2026-11-04 | cancel round trip p99, 8/s | — | 14.9 ms | 444 of 444 honoured |
 | 2026-11-04 | first fill after submit p99 | — | 17.0 ms | 1,947 of 2,400 filled; the rest rested and were cancelled, by design of the profile |
 | 2026-11-04 | FIX message size | — | NOS 150 B, ExecutionReport ≈ 200 B | from the 0.3b codec fixtures |
+| 2026-11-27 | hold p99 on the ledger over HTTP, baseline 40 holds/s + 8 releases/s for 60 s, 100 users, app on the host, PostgreSQL in the macgrant VM | ≤ 100 ms target | **19.8 ms** (p50 6.8, p90 12.2, max 44) | `loadgen --target ledger`, second of two runs (the first, cold, gave p99 29.3 ms), `docs/loadgen-ledger-baseline-2026-11-27.md`; 2,400 of 2,400 ok; server-side histogram for the same minute: p99 16.4 ms |
+| 2026-11-27 | time a ledger transfer holds its database connection | not estimated | **≈ 5 ms** once warm | from `hikaricp_connections_usage`; pool of 3 was about 8 % busy at 48 requests/s (0.24 connection-seconds per second), pending 0, longest wait for a connection 3.6 ms; so one connection serves ≈ 200 requests/s and the pool is not the limit at baseline |

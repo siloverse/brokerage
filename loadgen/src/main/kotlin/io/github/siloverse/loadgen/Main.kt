@@ -9,6 +9,7 @@ import java.time.format.DateTimeFormatter
 
 /**
  * `loadgen --profile baseline --duration 60 --host 127.0.0.1 --port 10402 --out build/loadgen`
+ * `loadgen --target ledger --url http://localhost:10301 --users 100 --duration 60`
  *
  * One tool, one baseline profile, reused unchanged for every comparison in the plan. The
  * report is printed and written as markdown so a run can be pasted into docs/numbers.md.
@@ -21,9 +22,12 @@ fun main(args: Array<String>) {
     val port = (opts["port"] ?: "10402").toInt()
     val out = Path.of(opts["out"] ?: "build/loadgen")
 
-    val target = FixVenueTarget(host, port)
+    val target: Target = when (val name = opts["target"] ?: "venue") {
+        "venue" -> FixVenueTarget(host, port).also { it.awaitConnected() }
+        "ledger" -> LedgerHttpTarget(opts["url"] ?: "http://localhost:10301", users = (opts["users"] ?: "100").toInt()).also { it.fundUsers() }
+        else -> throw IllegalArgumentException("unknown target '$name'; known: venue, ledger")
+    }
     val report = try {
-        target.awaitConnected()
         System.err.println("connected to ${target.description}; running '${profile.name}' for ${duration.seconds} s")
         runBlocking { OpenLoopScheduler(profile, target).run(duration) }
     } finally {

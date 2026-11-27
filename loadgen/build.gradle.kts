@@ -17,4 +17,5 @@ dependencies {
 
     testImplementation(project(":venue"))
     testImplementation(local.kotlinx.coroutines.test)
+    testImplementation(local.mockito.kotlin)
 }
