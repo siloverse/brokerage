@@ -5,6 +5,7 @@ import io.github.siloverse.brokerage.ledger.application.fill.services.FillServic
 import io.github.siloverse.brokerage.ledger.application.hold.exception.HoldNotFoundException
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.FillRequest
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.FillResponse
+import io.github.siloverse.brokerage.ledger.infrastructure.web.retry.RetryLostTransaction
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
 @RestController
+@RetryLostTransaction
 @RequestMapping("/api/ledger/fills")
 class FillController(private val fillService: FillService) {
 

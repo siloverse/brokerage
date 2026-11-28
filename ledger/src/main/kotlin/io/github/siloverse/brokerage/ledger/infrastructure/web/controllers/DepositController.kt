@@ -4,6 +4,7 @@ import io.github.siloverse.brokerage.ledger.application.deposit.model.DepositIns
 import io.github.siloverse.brokerage.ledger.application.deposit.services.DepositFundsService
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.DepositRequest
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.DepositResponse
+import io.github.siloverse.brokerage.ledger.infrastructure.web.retry.RetryLostTransaction
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
 @RestController
+@RetryLostTransaction
 @RequestMapping("/api/ledger/deposits")
 class DepositController(private val depositFundsService: DepositFundsService) {
 

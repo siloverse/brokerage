@@ -13,6 +13,5 @@ data class LedgerDataSourceProperties(
     val lockTimeoutMillis: Long = 2_000,
     val isolation: Isolation = Isolation.READ_COMMITTED,
 ) {
-    /** The level in the words the JDBC driver and the pool use, or null to leave the database's own default. */
     val jdbcIsolation: String? = if (isolation == Isolation.DEFAULT) null else "TRANSACTION_${isolation.name}"
 }

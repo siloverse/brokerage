@@ -24,6 +24,7 @@ spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-star
 mockito-kotlin = { module = "org.mockito.kotlin:mockito-kotlin", version.ref = "mockito-kotlin" }
 spring-boot-webmvc-test = { module = "org.springframework.boot:spring-boot-webmvc-test" }
 spring-boot-testcontainers = { module = "org.springframework.boot:spring-boot-testcontainers" }
+micrometer-core = { module = "io.micrometer:micrometer-core" }
 siloverse-messaging-core = { module = "io.github.siloverse:messaging-core", version.ref = "siloverse-messaging" }
 siloverse-messaging-rabbitmq = { module = "io.github.siloverse:messaging-rabbitmq", version.ref = "siloverse-messaging" }
 siloverse-messaging-spring = { module = "io.github.siloverse:messaging-spring", version.ref = "siloverse-messaging" }
