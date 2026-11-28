@@ -1,6 +1,7 @@
 package io.github.siloverse.brokerage.ledger.infrastructure.web.controllers
 
 import org.slf4j.LoggerFactory
+import org.springframework.dao.PessimisticLockingFailureException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -24,6 +25,12 @@ class LedgerBusyAdvice {
     @ExceptionHandler(CannotCreateTransactionException::class)
     fun noConnection(e: CannotCreateTransactionException): ResponseEntity<Map<String, String?>> {
         logger.warn("ledger busy: no database connection was free: {}", e.mostSpecificCause.message)
+        return busy("the ledger is busy, try again")
+    }
+
+    @ExceptionHandler(PessimisticLockingFailureException::class)
+    fun lostAfterRetries(e: PessimisticLockingFailureException): ResponseEntity<Map<String, String?>> {
+        logger.warn("ledger busy: a transaction lost against others and the retries are used up: {}", e.mostSpecificCause.message)
         return busy("the ledger is busy, try again")
     }
 

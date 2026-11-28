@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.springframework.dao.CannotAcquireLockException
 import org.springframework.jdbc.CannotGetJdbcConnectionException
 import org.springframework.jdbc.UncategorizedSQLException
 import org.springframework.transaction.CannotCreateTransactionException
@@ -42,6 +43,14 @@ class LedgerBusyAdviceTest {
         )
 
         val response = advice.noConnection(noConnection)
+
+        assertEquals(503, response.statusCode.value())
+        assertEquals("1", response.headers.getFirst("Retry-After"))
+    }
+
+    @Test
+    fun `a transaction that still loses after its retries is answered with 503`() {
+        val response = advice.lostAfterRetries(CannotAcquireLockException("could not serialize access due to concurrent update"))
 
         assertEquals(503, response.statusCode.value())
         assertEquals("1", response.headers.getFirst("Retry-After"))

@@ -6,6 +6,7 @@ import io.github.siloverse.brokerage.ledger.application.hold.services.HoldServic
 import io.github.siloverse.brokerage.ledger.domain.account.exception.InsufficientFundsException
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.HoldRequest
 import io.github.siloverse.brokerage.ledger.infrastructure.web.model.HoldResponse
+import io.github.siloverse.brokerage.ledger.infrastructure.web.retry.RetryLostTransaction
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
 @RestController
+@RetryLostTransaction
 @RequestMapping("/api/ledger/holds")
 class HoldController(private val holdService: HoldService) {
 

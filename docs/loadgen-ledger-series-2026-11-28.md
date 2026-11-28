@@ -156,3 +156,61 @@ app up after 11s
 
 SERIES DONE 00:59:15
 ```
+
+## With the retry, 01:16 to 01:22
+
+The same two serializable runs after `@RetryLostTransaction` was added: up to three more
+attempts after about 5, 10 and 20 ms. A request that still loses is answered 503.
+
+| # | Run | first attempt and retries all lost (503) | retries | p50 | p99 | max |
+|---|---|---|---|---|---|---|
+| 9 | serializable, 100 users, 5 minutes | 33 of 12,000 holds (0.3 %) | 591 for holds, 118 a minute | 9.3 ms | 66.5 ms | 319 ms |
+| 10 | serializable, one hot account | 30 of 2,400 holds (1.3 %) | 779 for holds in one minute | 9.4 ms | 89.0 ms | 134 ms |
+
+Compare runs 7 and 8 above, without the retry: 75 and 364 failures, p99 24.6 and 20.6 ms.
+
+The "release given_up" counts below (9 and 13) equal the releases answered 404. The listener
+counted every failure Spring would not retry; it now counts only lost transactions.
+
+```text
+MEASUREMENT SERIES started 2026-11-28 01:15:38
+
+##### APP START: --brokerage.ledger.datasource.isolation=serializable
+app up after 17s
+
+=== warm-up (ignore)   [01:15:55]
+| type | target rate | sent | achieved rate | ok | rejected | timeout | error | skipped | p50 | p90 | p99 | max 
+| order | 40.0/s | 1200 | 40.0/s | 1139 | 0 | 0 | 61 | 0 | 15.5 ms | 141.8 ms | 492.3 ms | 758.8 ms
+| cancel | 8.0/s | 210 | 7.0/s | 192 | 18 | 0 | 0 | 30 | 14.6 ms | 94.5 ms | 226.9 ms | 335.4 ms | — | — |
+  server status codes: hold 201: 1139, hold 503: 61, release 200: 192, release 404: 18
+  server-side, placed holds only: p50 12.1 ms  p99 495.4 ms
+  connection held avg 17.3 ms over 2198 uses; wait for a connection avg 16.91 ms; pool timeouts 0
+  error log lines: 0
+  retries counted by the ledger: hold given_up: 61, hold retried: 611, release given_up: 18, release retried: 22
+  pool, sampled each second: peak active 3, peak pending 16
+
+=== 9. H5 with retry: serializable, 100 users, 5 minutes   [01:16:32]
+| type | target rate | sent | achieved rate | ok | rejected | timeout | error | skipped | p50 | p90 | p99 | max 
+| order | 40.0/s | 12000 | 40.0/s | 11967 | 0 | 0 | 33 | 0 | 9.3 ms | 20.2 ms | 66.5 ms | 318.5 ms
+| cancel | 8.0/s | 2344 | 7.8/s | 2335 | 9 | 0 | 0 | 56 | 7.0 ms | 15.0 ms | 34.3 ms | 135.3 ms | — | — |
+  server status codes: hold 201: 11967, hold 503: 33, release 200: 2335, release 404: 9
+  server-side, placed holds only: p50 8.3 ms  p99 60.8 ms
+  connection held avg 9.4 ms over 15402 uses; wait for a connection avg 0.16 ms; pool timeouts 0
+  error log lines: 0
+  retries counted by the ledger: hold given_up: 33, hold retried: 591, release given_up: 9, release retried: 15
+  pool, sampled each second: peak active 3, peak pending 3
+
+=== 10. serializable with retry, one hot account   [01:21:37]
+| type | target rate | sent | achieved rate | ok | rejected | timeout | error | skipped | p50 | p90 | p99 | max 
+| order | 40.0/s | 2400 | 40.0/s | 2370 | 0 | 0 | 30 | 0 | 9.4 ms | 29.0 ms | 89.0 ms | 134.0 ms
+| cancel | 8.0/s | 443 | 7.4/s | 430 | 13 | 0 | 0 | 37 | 6.0 ms | 14.0 ms | 37.1 ms | 70.4 ms | — | — |
+  server status codes: hold 201: 2370, hold 503: 30, release 200: 430, release 404: 13
+  server-side, placed holds only: p50 8.0 ms  p99 85.3 ms
+  connection held avg 8.2 ms over 3663 uses; wait for a connection avg 0.09 ms; pool timeouts 0
+  error log lines: 0
+  retries counted by the ledger: hold given_up: 30, hold retried: 779, release given_up: 13, release retried: 23
+  pool, sampled each second: peak active 3, peak pending 0
+
+SERIES DONE 01:22:40
+```
+

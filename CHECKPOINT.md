@@ -1386,5 +1386,56 @@ behind all of it. Serializable would guard against statements we have not writte
 every guarded request needs a retry. The `isolation` setting stays, at its default, so one
 rare and complicated operation can ask for more later.
 
-Open, if wanted: stage 2, a retry outside the transaction and a counter. It would also serve
-deadlocks (40P01) at read committed.
+Stage 2, the retry, was added the same night; see the next entry.
+
+## 2026-11-28 — H5 stage 2: the retry, and what it cost
+
+The **Retry** pattern. It is not a Gang of Four pattern; it belongs to the stability or
+resilience patterns (*Release It!*), with Timeout, Circuit Breaker, Bulkhead and Fail Fast.
+It serves **resilience**: a failure that would have reached the caller becomes a success
+the caller never notices. It does not make data safer (durability) or more correct
+(consistency). How it is built is a Gang of Four pattern: Spring wraps it around the
+controller, which is a Proxy.
+
+- **What is retried.** Only "the database cancelled this transaction in favour of another":
+  a serialization failure (40001) or a deadlock (40P01), both a
+  `PessimisticLockingFailureException` in Spring. A timeout or "busy" is not retried: drill
+  3 showed what retrying against something that will not pass does.
+- **Where.** `@RetryLostTransaction` on the ledger's controllers, outside the services. So
+  each attempt is a new transaction; after such an error the old one is dead (H3).
+- **How often.** Three more attempts, about 5, 10 and 20 ms apart, with a random extra
+  (jitter) so two losers do not meet again. Then 503 with `Retry-After`.
+- **Visible.** One log line and one count per retry: `ledger_transaction_retries`, by
+  operation and outcome. Spring Framework 7 ships the retry support; no new library.
+
+The two serializable runs again, with the retry:
+
+| Run | without retry | with retry |
+|---|---|---|
+| 100 accounts, 5 min: failed | 75 of 12,000 | 33 of 12,000 after four attempts |
+| retries | — | 591, **118 a minute** |
+| p99 | 24.6 ms | 66.5 ms |
+| one account, 1 min: failed | 364 of 2,400 | 30 of 2,400 after four attempts |
+| retries | — | **779 a minute** |
+| p99 | 20.6 ms | 89 ms |
+
+- **The retry works and is not free.** Most lost transactions succeed on a later attempt,
+  and the caller never knows. But the p99 triples, and up to 1.3 % still fail after four
+  attempts.
+- **A retried attempt lost again about 45 % of the time.** Far more often than a first
+  attempt. My reading: the generator sends on an exact timetable, a hold every 25 ms, so
+  first attempts rarely overlap. A retry lands between the slots, where it does overlap.
+- **So the first-attempt failure rates flatter serializable.** Real traffic is irregular and
+  would collide more than 0.6 %. An exact timetable is right for measuring latency honestly
+  and wrong for estimating collisions. Not proven: it would need a generator with random
+  arrival times.
+- The books were clean after both runs.
+- The listener first counted every failure Spring would not retry, a 404 included. It now
+  counts lost transactions only.
+
+The bill for serializable, on this ledger: about 120 retries a minute at normal load, three
+times the p99, and still some failures. At read committed: no retries, no failures, 23 ms.
+The retry stays in the code because a deadlock at read committed is the same message.
+
+H5 is done. Chapter 1 has no building left.
+

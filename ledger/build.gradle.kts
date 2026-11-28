@@ -15,6 +15,7 @@ dependencies {
     implementation(libs.bundles.spring.web)
     implementation(kotlin("reflect"))
     implementation(local.siloverse.messaging.core)
+    implementation(local.micrometer.core)
 
     testImplementation(local.spring.boot.starter.test)
     testImplementation(local.mockito.kotlin)

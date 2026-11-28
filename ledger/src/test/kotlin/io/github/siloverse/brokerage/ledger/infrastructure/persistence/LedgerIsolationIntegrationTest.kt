@@ -4,7 +4,6 @@ import io.github.siloverse.brokerage.ledger.BaseIntegrationTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
-/** What the ledger's connections are really set to, asked from the database itself. */
 class LedgerIsolationIntegrationTest : BaseIntegrationTest() {
 
     @Test
