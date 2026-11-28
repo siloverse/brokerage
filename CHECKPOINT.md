@@ -1284,3 +1284,107 @@ The dashboard, built by hand and corrected panel by panel:
 Not yet done: the same run on one hot account and at five times the load; H5, the ledger at
 serializable.
 
+## 2026-11-28 — Correction: last night's ledger numbers measured replays
+
+Most of the load generator numbers from 2026-11-27 are wrong, and the mistake was mine.
+
+- **What was wrong.** `LedgerHttpTarget` built a hold's reference from the order id only.
+  The generator numbers its orders `r-1`, `r-2`, … in every run. So the second run sent the
+  references of the first, and the ledger did what it must: it recognised them and answered
+  200, "already placed", without doing the work. Idempotency was correct. The test was not.
+- **What that invalidates.** Counted from the server's own status codes:
+
+  | Run | new holds (201) | replays (200) | reported p99 |
+  |---|---|---|---|
+  | first run, cold | about 1,600 | about 400 | 29.3 ms |
+  | second run, "the baseline" | 0 | 2,400 | 19.8 ms |
+  | one hot account | 0 | 2,400 | 30.0 ms |
+  | five times the load, pool 3 | 9,600 | 2,400 | 138 ms |
+  | five times the load, pool 10 | 0 | 12,000 | 27.9 ms |
+  | serializable, 5 minutes | 0 | 12,000 | 24.5 ms |
+  | serializable, hot account | 0 | 2,400 | 28.3 ms |
+
+  So "p99 of a hold is 19.8 ms" was the p99 of a replay. "One hot account costs only
+  10 ms" was never tested: replays do not touch the account row. "A pool of 10 fixes the
+  tail" compared real holds with replays. And "the median is better at five times the load",
+  which I could not explain, was replays being cheaper than holds.
+- **What still stands.** The run at five times the load with the pool of 3 was mostly real
+  work, and its picture (median unchanged, a long queue for a connection) is real. The
+  dashboard lessons stand. The warm-up effect is unproven: the "warm" run was the replay
+  run.
+- **How it was found.** The serializable runs showed zero failures, on one hot account too,
+  where a hold and a release arrive within 0.1 ms of each other every 125 ms. That could not
+  be right. A direct test (40 pairs of one hold and one release at the same moment) failed
+  39 times out of 40. The server's counters then showed every hold of the run answered 200.
+- **The signal was on our own dashboard.** Drill 2 taught "201 means booked, 200 means
+  replayed", and the requests panel splits by status. I looked at latency and did not look
+  at what the requests had done.
+- **The fix.** A run id is part of every reference. And a hold answered with 200 is counted
+  as an **error** by the generator, so a run that does no real work fails loudly. The
+  generator's own rule already said it: a fast failure must never flatter the latency.
+
+A measurement is only as good as the check that the system did the work. Count the rows,
+or count the status codes, before reading the latency.
+
+Done the same night, see the next entry.
+
+## 2026-11-28 — Measure and H5, this time with proof of work
+
+The whole series again, run by one script against an app it started itself, three times
+with different settings. After every run the script read the app's own counters, so each
+latency comes with the status codes: a placed hold is a 201.
+
+| # | Run | isolation | pool | failed | p50 | p99 |
+|---|---|---|---|---|---|---|
+| 1, 2 | baseline, 40 holds/s on 100 users | read committed | 3 | 0 | 8.4 ms | 23 ms |
+| 3 | one hot account | read committed | 3 | 0 | 7.9 ms | 27 ms |
+| 4 | five times the load | read committed | 3 | 0 | 5.0 ms | 100 ms |
+| 6 | five times the load | read committed | 10 | 0 | 5.1 ms | 36 ms |
+| 7 | H5: 5 minutes | serializable | 3 | 75 of 12,000 (0.6 %) | 7.7 ms | 25 ms |
+| 8 | one hot account | serializable | 3 | 364 of 2,400 (15 %) | 7.6 ms | 21 ms |
+
+**The chapter's number: the p99 of a hold at 40 requests a second is 23 ms.** Two runs gave
+22.9 and 23.1. The pass mark is 100.
+
+What holds now, on real work:
+
+- **One hot account costs little at read committed.** p99 27 ms against 23. A hold and a
+  release arrive on that account within 0.1 ms of each other eight times a second; the
+  second waits a few milliseconds for the row and continues.
+- **At five times the load the median gets better (5 ms) and the p99 reaches the pass mark
+  (100 ms).** Up to 12 requests waited for one of 3 connections. The tail breaks long
+  before the average says the system is full.
+- **A pool of 10 brings that p99 to 36 ms.** At most 5 connections were in use at once.
+  Last night's claim was right; last night's evidence for it was not.
+- The better median under load is real: it appears with both pool sizes. A busy system
+  keeps its code and data warm.
+- The "warm-up" difference between a first and a second run did not show: 22.9 and
+  23.1 ms. After 30 seconds of traffic the app was warm.
+
+H5, the price of serializable (stage 1, no retry yet):
+
+- **Spread over 100 accounts: 0.6 % of the holds are cancelled, 15 a minute.** The ones
+  that go through are as fast as at read committed.
+- **On one account: 15 %.** One hold in seven. And 77 releases then found no hold.
+- **Two different messages, as by hand.** On one account it is "concurrent update" (H3):
+  two transactions changed the same row. Over 100 accounts most are "read/write
+  dependencies … pivot" (H4): 54 of 76. Those transactions touched **different**
+  accounts. PostgreSQL tracks reads by page and index range, not by row, so two unrelated
+  holds can look dependent. Serializable cancels transactions that did nothing wrong, and
+  that is by design.
+- At read committed all of these 439 requests succeeded, and the books were right.
+  Serializable is safe; here it buys nothing and costs up to one request in seven.
+
+Awais's guesses: almost none for 100 accounts (right: 0.6 %), none for one account (it was
+15 %). Mine from the night before were worse: I had "measured" zero.
+
+**Decision: the ledger stays at read committed.** It is correct there by how its statements
+are written: the database calculates on the row (`booked = booked - :amount`), the check
+sits in the same update (`where available >= :amount`), holds meet on one shared row
+(`reserved`), a fill locks before it decides, and a constraint and the 1.4 check stand
+behind all of it. Serializable would guard against statements we have not written, and
+every guarded request needs a retry. The `isolation` setting stays, at its default, so one
+rare and complicated operation can ask for more later.
+
+Open, if wanted: stage 2, a retry outside the transaction and a counter. It would also serve
+deadlocks (40P01) at read committed.

@@ -1,5 +1,11 @@
 # loadgen baseline against the ledger — 2026-11-27 23:01 (second of two runs, plan chapter 1 "Measure")
 
+> **INVALID, kept as a record of the mistake (2026-11-28).** `LedgerHttpTarget` derived a hold's
+> reference from the order id alone, and the generator numbers its orders the same way in
+> every run. So from the second run on, the ledger knew every reference already and answered
+> 200 without placing a hold. This table is a run of 2,400 replays, not of 2,400 holds. The
+> target now adds a run id to the reference and counts a 200 on a hold as an error.
+
 Target: ledger over HTTP at http://localhost:10301 (order = hold, cancel = release), 100 users. Requested 60 s, ran 59.993 s. Open loop; latency from the scheduled send time; only OK requests count toward percentiles. Skipped = scheduled but nothing to send (a cancel with no resting order).
 
 | type | target rate | sent | achieved rate | ok | rejected | timeout | error | skipped | p50 | p90 | p99 | max | pass mark | verdict |
