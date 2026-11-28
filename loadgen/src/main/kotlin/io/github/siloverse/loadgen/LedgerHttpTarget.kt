@@ -20,6 +20,12 @@ import java.util.UUID
  * given money, not shares. A hold's reference is derived from the order id, so a release
  * needs no lookup.
  *
+ * The reference also contains an id of this run. The generator numbers its orders the same
+ * way in every run, and the ledger answers a reference it already knows with 200 and does
+ * no work. Without the run id every run after the first measures replays. For the same
+ * reason only 201 counts as a hold that was placed: a 200 is reported as an error, so a run
+ * that does no real work cannot pass.
+ *
  * @param users how many accounts the holds are spread over. Two holds on one account queue
  *   on that account's row, so a small number is a contention test, not a baseline.
  */
@@ -31,6 +37,7 @@ class LedgerHttpTarget(
 ) : Target {
 
     private val userUuids: List<UUID> = List(users) { UUID.randomUUID() }
+    private val runId: UUID = UUID.randomUUID()
 
     override val description = "ledger over HTTP at $baseUrl (order = hold, cancel = release), $users users"
     override val supports = setOf(RequestType.ORDER, RequestType.CANCEL)
@@ -50,20 +57,20 @@ class LedgerHttpTarget(
     override suspend fun submit(order: NewOrder): Outcome {
         val amount = order.limitPrice.minorUnits * order.quantity.shares
         val body = """{"reference":"${referenceOf(order.clientOrderId)}","userUuid":"${userOf(order.clientOrderId)}","assetType":"CASH","assetCode":"EUR","amount":$amount}"""
-        return send(post("/api/ledger/holds", body))
+        return send(post("/api/ledger/holds", body), ::holdOutcomeOf)
     }
 
     override suspend fun cancel(id: ClientOrderId): Outcome =
-        send(post("/api/ledger/holds/${referenceOf(id)}/release", ""))
+        send(post("/api/ledger/holds/${referenceOf(id)}/release", ""), ::outcomeOf)
 
     override fun close() {
         http.close()
     }
 
-    private suspend fun send(request: HttpRequest.Builder): Outcome =
+    private suspend fun send(request: HttpRequest.Builder, outcome: (Int) -> Outcome): Outcome =
         try {
             val response = http.sendAsync(request.timeout(replyTimeout).build(), HttpResponse.BodyHandlers.discarding()).await()
-            outcomeOf(response.statusCode())
+            outcome(response.statusCode())
         } catch (e: HttpTimeoutException) {
             Outcome.TIMEOUT
         }
@@ -73,7 +80,7 @@ class LedgerHttpTarget(
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body))
 
-    private fun referenceOf(id: ClientOrderId): UUID = UUID.nameUUIDFromBytes(id.value.toByteArray())
+    private fun referenceOf(id: ClientOrderId): UUID = UUID.nameUUIDFromBytes("$runId/${id.value}".toByteArray())
 
     private fun userOf(id: ClientOrderId): UUID = userUuids[Math.floorMod(id.value.hashCode(), userUuids.size)]
 
@@ -84,5 +91,8 @@ class LedgerHttpTarget(
             in 400..499 -> Outcome.REJECTED
             else -> Outcome.ERROR
         }
+
+        /** A hold is placed only by a 201. A 200 is the ledger replaying a reference it already had: no work was done. */
+        fun holdOutcomeOf(status: Int): Outcome = if (status == 200) Outcome.ERROR else outcomeOf(status)
     }
 }

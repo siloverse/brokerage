@@ -26,6 +26,7 @@ class LedgerPersistenceConfiguration {
             maximumPoolSize = ledgerDataSourceProperties.poolSize
             connectionTimeout = ledgerDataSourceProperties.connectionTimeoutMillis
             connectionInitSql = "set lock_timeout = ${ledgerDataSourceProperties.lockTimeoutMillis}"
+            transactionIsolation = ledgerDataSourceProperties.jdbcIsolation
             poolName = "ledger"
             schema = "ledger"
         })

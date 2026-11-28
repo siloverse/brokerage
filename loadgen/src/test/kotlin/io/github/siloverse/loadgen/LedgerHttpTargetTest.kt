@@ -104,6 +104,33 @@ class LedgerHttpTargetTest {
     }
 
     @Test
+    fun `another run uses other references for the same orders, so it never replays the holds of an earlier run`() = runBlocking {
+        theLedgerAnswers(201)
+
+        aTarget().submit(anOrder("r-1"))
+        aTarget().submit(anOrder("r-1"))
+
+        val sent = argumentCaptor<HttpRequest>()
+        verify(http, times(2)).sendAsync(sent.capture(), any<HttpResponse.BodyHandler<Void>>())
+        val references = sent.allValues.map { Regex(""""reference":"([^"]+)"""").find(bodyOf(it))!!.groupValues[1] }
+        assertNotEquals(references[0], references[1])
+    }
+
+    @Test
+    fun `a hold the ledger only replays is not a placed hold`() = runBlocking {
+        theLedgerAnswers(200)
+
+        assertEquals(Outcome.ERROR, aTarget().submit(anOrder("r-1")))
+    }
+
+    @Test
+    fun `a release answered with 200 is done`() = runBlocking {
+        theLedgerAnswers(200)
+
+        assertEquals(Outcome.OK, aTarget().cancel(ClientOrderId("r-1")))
+    }
+
+    @Test
     fun `the holds are spread over the users of the run`() = runBlocking {
         theLedgerAnswers(201)
         val target = aTarget(users = 10)
@@ -120,6 +147,10 @@ class LedgerHttpTargetTest {
     fun `the answer decides the outcome`() {
         assertEquals(Outcome.OK, LedgerHttpTarget.outcomeOf(201))
         assertEquals(Outcome.OK, LedgerHttpTarget.outcomeOf(200))
+        assertEquals(Outcome.OK, LedgerHttpTarget.holdOutcomeOf(201))
+        assertEquals(Outcome.ERROR, LedgerHttpTarget.holdOutcomeOf(200))
+        assertEquals(Outcome.REJECTED, LedgerHttpTarget.holdOutcomeOf(409))
+        assertEquals(Outcome.ERROR, LedgerHttpTarget.holdOutcomeOf(503))
         assertEquals(Outcome.REJECTED, LedgerHttpTarget.outcomeOf(409))
         assertEquals(Outcome.REJECTED, LedgerHttpTarget.outcomeOf(404))
         assertEquals(Outcome.ERROR, LedgerHttpTarget.outcomeOf(500))
